@@ -44,6 +44,7 @@ export class GameAudio {
     for (const f of [110, 116.5, 164.8, 174.6, 55]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(cf); o.start(); }
     const trem = ctx.createGain(); trem.gain.value = 0.6; const tl = ctx.createOscillator(); tl.type = 'square'; tl.frequency.value = 9; const tg = ctx.createGain(); tg.gain.value = 0.35; tl.connect(tg).connect(trem.gain); tl.start();
     cf.connect(trem).connect(this.chaseG).connect(this.fx);
+    this.#initMusic();
     this.ready = true;
   }
 
@@ -139,10 +140,123 @@ export class GameAudio {
   }
   win() { if (this.ready) [196, 246.9, 293.7, 392, 493.9].forEach((f, i) => this.#tone('sine', f, null, 5, 0.09, { attack: 1.2, delay: i * 0.25 })); }
 
+  // ---------------------------------------------------------------- score, storm, radio
+  #initMusic() {
+    const ctx = this.ctx;
+    this.musicG = ctx.createGain(); this.musicG.gain.value = 0; this.musicG.connect(this.fx);
+    // string pad: a D-minor cluster with a tritone that swells in as tension rises
+    const padF = this.padF = ctx.createBiquadFilter(); padF.type = 'lowpass'; padF.frequency.value = 420; padF.Q.value = 0.8;
+    const padG = ctx.createGain(); padG.gain.value = 0.11; padF.connect(padG).connect(this.musicG);
+    for (const f of [73.42, 110, 146.83, 174.61, 220]) for (const det of [-5, 6]) {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = det + (Math.random() - 0.5) * 4;
+      const g = ctx.createGain(); g.gain.value = 0.16; const l = ctx.createOscillator(); l.frequency.value = 0.05 + Math.random() * 0.12; const lg = ctx.createGain(); lg.gain.value = 0.1; l.connect(lg).connect(g.gain); l.start();
+      o.connect(g).connect(padF); o.start();
+    }
+    this.tensG = ctx.createGain(); this.tensG.gain.value = 0;
+    const tf = ctx.createBiquadFilter(); tf.type = 'bandpass'; tf.frequency.value = 1700; tf.Q.value = 0.9;
+    for (const f of [207.65, 415.3, 440, 622.25, 659.25, 880]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 30; const v = ctx.createOscillator(); v.frequency.value = 5 + Math.random() * 2; const vg = ctx.createGain(); vg.gain.value = f * 0.008; v.connect(vg).connect(o.frequency); v.start(); o.connect(tf); o.start(); }
+    const tt = ctx.createGain(); tt.gain.value = 0.55; const tl = ctx.createOscillator(); tl.frequency.value = 11; const tg = ctx.createGain(); tg.gain.value = 0.4; tl.connect(tg).connect(tt.gain); tl.start();
+    tf.connect(tt).connect(this.tensG).connect(this.musicG);
+    // rain on the roof and windows
+    this.rainG = ctx.createGain(); this.rainG.gain.value = 0;
+    const r1 = this.#loopNoise(), rf = ctx.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 2600; const rg = ctx.createGain(); rg.gain.value = 0.5; r1.connect(rf).connect(rg).connect(this.rainG);
+    const r2 = this.#loopNoise(), rf2 = ctx.createBiquadFilter(); rf2.type = 'lowpass'; rf2.frequency.value = 380; r2.playbackRate.value = 0.7; r2.connect(rf2).connect(this.rainG);
+    this.rainG.connect(this.fx);
+    // hand radio: everything through a small, nasal speaker
+    this.radioG = ctx.createGain(); this.radioG.gain.value = 0;
+    const sp1 = ctx.createBiquadFilter(); sp1.type = 'bandpass'; sp1.frequency.value = 1500; sp1.Q.value = 0.9;
+    const sh = ctx.createWaveShaper(); const cv = new Float32Array(256); for (let i = 0; i < 256; i++) { const x = i / 128 - 1; cv[i] = Math.tanh(x * 3); } sh.curve = cv;
+    this.radioIn = ctx.createGain(); this.radioIn.connect(sh).connect(sp1).connect(this.radioG).connect(this.dry);
+    this.staticG = ctx.createGain(); this.staticG.gain.value = 0.05; const st = this.#loopNoise(); st.playbackRate.value = 1.3; st.connect(this.staticG).connect(this.radioIn);
+    this.radioTune = ctx.createGain(); this.radioTune.gain.value = 0.5; this.radioTune.connect(this.radioIn);
+    const hum = ctx.createOscillator(); hum.type = 'sawtooth'; hum.frequency.value = 100; const hg = ctx.createGain(); hg.gain.value = 0.012; hum.connect(hg).connect(this.radioIn); hum.start();
+    this.noteT = 3; this.bar = 0; this.radioT = 0; this.radioStep = 0; this.radioOn = false; this.hitT = 20; this.breathT = 0;
+  }
+  startScore() { if (!this.ready) return; const t = this.ctx.currentTime; this.musicG.gain.setTargetAtTime(0.55, t, 4); this.rainG.gain.setTargetAtTime(0.035, t, 3); }
+  setRadio(on) { this.radioOn = on; if (!this.ready) return; this.#noise(0.12, 'bandpass', 2400, 2, 0.3, { dest: this.dry }); this.#tone('square', on ? 500 : 900, on ? 1800 : 300, 0.18, 0.05, { dest: this.dry }); this.radioG.gain.setTargetAtTime(on ? 0.5 : 0, this.ctx.currentTime, 0.06); }
+  thunder(vol = 1, delay = 0) {
+    if (!this.ready) return;
+    this.#noise(0.25, 'highpass', 1200, 0.5, 0.5 * vol, { delay, attack: 0.002 });                       // crack
+    this.#noise(4.5, 'lowpass', 160, 0.6, 1.1 * vol, { delay: delay + 0.05, attack: 0.08, freqTo: 55 }); // roll
+    this.#noise(3.2, 'lowpass', 320, 0.8, 0.5 * vol, { delay: delay + 0.6, attack: 0.5, freqTo: 80, pan: Math.random() - 0.5 });
+    this.#tone('sine', 48, 26, 3.0, 0.7 * vol, { delay: delay + 0.05 });
+  }
+  wail(vol = 1, pan = 0) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime, dur = 3.2;
+    const out = ctx.createGain(); out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(0.22 * vol, t + 0.9); out.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 2.5; const pn = ctx.createStereoPanner(); pn.pan.value = pan;
+    for (const r of [1, 1.006, 1.5, 2.01]) {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(330 * r, t); o.frequency.linearRampToValueAtTime(590 * r, t + 1.1); o.frequency.linearRampToValueAtTime(520 * r, t + 1.9); o.frequency.exponentialRampToValueAtTime(250 * r, t + dur);
+      const v = ctx.createOscillator(); v.frequency.value = 5.5; const vg = ctx.createGain(); vg.gain.value = 12 * r; v.connect(vg).connect(o.frequency); v.start(t); v.stop(t + dur);
+      o.connect(f); o.start(t); o.stop(t + dur + 0.1);
+    }
+    f.connect(out).connect(pn).connect(this.fx);
+    this.#noise(dur, 'bandpass', 900, 3, 0.12 * vol, { attack: 1, pan, freqTo: 1500 });
+  }
+  growl(vol = 1, pan = 0) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime, dur = 1.6;
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(62, t); o.frequency.linearRampToValueAtTime(48, t + dur);
+    const am = ctx.createGain(); am.gain.value = 0.5; const l = ctx.createOscillator(); l.type = 'square'; l.frequency.setValueAtTime(23, t); l.frequency.linearRampToValueAtTime(15, t + dur); const lg = ctx.createGain(); lg.gain.value = 0.5; l.connect(lg).connect(am.gain); l.start(t); l.stop(t + dur);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 520; f.Q.value = 1.4; const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.7 * vol, t + 0.25); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const pn = ctx.createStereoPanner(); pn.pan.value = pan; o.connect(am).connect(f).connect(g).connect(pn).connect(this.fx); o.start(t); o.stop(t + dur + 0.1);
+  }
+  crawlStep(vol, pan) {
+    if (!this.ready || vol < 0.02) return;
+    for (let i = 0; i < 3; i++) this.#noise(0.018, 'bandpass', 2600 + Math.random() * 2600, 9, 0.5 * vol, { pan, delay: i * 0.035 + Math.random() * 0.02, attack: 0.001 });   // knuckles and nails on wood
+    this.#tone('sine', 110, 60, 0.07, 0.3 * vol, { pan });
+    if (Math.random() < 0.2) this.#noise(0.12, 'bandpass', 700, 6, 0.35 * vol, { pan, attack: 0.002, freqTo: 240 });   // a joint cracking
+  }
+  bats(vol = 1, pan = 0) {
+    if (!this.ready) return;
+    for (let i = 0; i < 34; i++) { const d = Math.random() * 1.8, p = Math.max(-1, Math.min(1, pan + (d - 0.9) * 0.9));
+      this.#noise(0.05, 'bandpass', 500 + Math.random() * 700, 1.5, 0.3 * vol, { delay: d, pan: p, attack: 0.01 });
+      if (i % 2) this.#tone('sine', 5200 + Math.random() * 3200, 4200 + Math.random() * 2000, 0.05, 0.045 * vol, { delay: d + 0.02, pan: p, attack: 0.002 }); }
+  }
+  ping(strength = 0.5) { if (this.ready) { this.#tone('sine', 1320, 1300, 0.09, 0.05 + 0.07 * strength, { dest: this.dry, attack: 0.002 }); if (strength > 0.6) this.#tone('sine', 1760, 1740, 0.07, 0.05, { dest: this.dry, delay: 0.1 }); } }
+  breath(vol = 0.5) { if (this.ready) { this.#noise(0.55, 'bandpass', 1500, 1.2, 0.08 * vol, { dest: this.dry, attack: 0.22, freqTo: 2300 }); this.#noise(0.7, 'bandpass', 900, 1.2, 0.09 * vol, { dest: this.dry, attack: 0.2, freqTo: 500, delay: 0.62 }); } }
+  radioVoice() { if (this.ready && this.radioOn) for (let i = 0; i < 7; i++) this.#tone('sawtooth', 110 + Math.random() * 70, 90 + Math.random() * 60, 0.13, 0.25, { dest: this.radioIn, delay: i * 0.16 + Math.random() * 0.05 }); }
+  #score(dt, s) {
+    const t = this.ctx.currentTime, tension = s.tension || 0;
+    this.padF.frequency.setTargetAtTime(380 + tension * 900, t, 1.5);
+    this.tensG.gain.setTargetAtTime(tension * tension * 0.2, t, 0.8);
+    // a slow music box figure in D minor that keeps reaching for the wrong note
+    this.noteT -= dt;
+    if (this.noteT <= 0) {
+      const motifs = [[587.3, 698.5, 880, 932.3, 880, 698.5], [587.3, 554.4, 587.3, 698.5, 659.3], [880, 830.6, 698.5, 587.3, 554.4, 440], [1174.7, 932.3, 880, 698.5]];
+      const m = motifs[this.bar++ % motifs.length], sour = Math.random() < 0.3 + tension * 0.3;
+      m.forEach((f, i) => { const ff = (sour && i === m.length - 1 ? f * 1.059 : f) * (s.chase ? 0.5 : 1);
+        this.#tone('sine', ff, null, 2.6, 0.05, { delay: i * 0.52, attack: 0.004, pan: (i % 2 ? 0.25 : -0.25), dest: this.musicG });
+        this.#tone('triangle', ff * 2.005, null, 1.2, 0.012, { delay: i * 0.52, attack: 0.003, dest: this.musicG }); });
+      this.noteT = m.length * 0.52 + 7 + Math.random() * 9 - tension * 5;
+    }
+    this.hitT -= dt;
+    if (this.hitT <= 0) { this.hitT = 16 + Math.random() * 22 - tension * 9; this.#tone('sine', 55, 36.7, 3.5, 0.5, { attack: 0.01, dest: this.musicG }); this.#tone('sawtooth', 73.4, 69.3, 2.5, 0.07, { attack: 0.02, dest: this.musicG }); if (tension > 0.4) this.#noise(2.2, 'bandpass', 2400, 6, 0.05, { attack: 1.9, freqTo: 3800, dest: this.musicG }); }
+    // the radio: a warped waltz under static; the static swells when something is near
+    if (this.radioOn) {
+      const near = s.staticLevel || 0;
+      this.staticG.gain.setTargetAtTime(0.035 + near * near * 0.75 + (Math.random() < 0.02 ? 0.3 : 0), t, 0.05);
+      this.radioTune.gain.setTargetAtTime(0.5 * (1 - near * 0.85), t, 0.2);
+      this.radioT -= dt;
+      if (this.radioT <= 0) {
+        const tune = [293.7, 349.2, 440, 0, 466.2, 440, 349.2, 0, 329.6, 349.2, 392, 0, 277.2, 329.6, 293.7, 0, 587.3, 554.4, 466.2, 0, 440, 349.2, 329.6, 0, 293.7, 277.2, 220, 0, 293.7, 0, 0, 0];
+        const f = tune[this.radioStep++ % tune.length], wow = 1 + Math.sin(t * 2.1) * 0.012;
+        if (f) { this.#tone('triangle', f * wow, f * wow * 0.996, 0.5, 0.3, { dest: this.radioTune, attack: 0.02 }); this.#tone('sine', f * wow * 2, null, 0.3, 0.1, { dest: this.radioTune, attack: 0.02 }); if (this.radioStep % 4 === 1) this.#tone('triangle', f * wow / 2, null, 0.9, 0.3, { dest: this.radioTune, attack: 0.03 }); }
+        this.radioT = 0.36;
+      }
+    }
+    // the player's own breathing when frightened or winded
+    this.breathT -= dt;
+    const pant = Math.max(s.fear > 0.5 ? s.fear : 0, s.winded || 0);
+    if (pant > 0.3 && this.breathT <= 0) { this.breath(pant); this.breathT = 1.9 - pant * 0.75; }
+  }
+
   // ---------------------------------------------------------------- continuous
   update(dt, s) {
     if (!this.ready) return;
     const t = this.ctx.currentTime;
+    this.#score(dt, s);
     const prox = Math.max(0, 1 - s.ghostDist / 16);
     this.presG.gain.setTargetAtTime(s.ghostActive ? 0.02 + prox * prox * 0.16 : 0, t, 0.25);
     this.chaseG.gain.setTargetAtTime(s.chase ? 0.13 : 0, t, s.chase ? 0.15 : 1.2);

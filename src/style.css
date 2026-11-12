@@ -86,3 +86,31 @@ input[type=range] { width: 90px; padding: 0; }
 .parchment h3 { margin: 0 0 14px; font-weight: 400; letter-spacing: .2em; text-transform: uppercase; font-size: 13px; font-style: normal; border-bottom: 1px solid rgba(42,28,16,.4); padding-bottom: 10px; }
 .parchment small { display: block; margin-top: 18px; font-style: normal; letter-spacing: .2em; font-size: 10px; text-transform: uppercase; opacity: .6; }
 .parchment em { color: #6b0d08; font-weight: 600; }
+
+/* ---------------------------------------------------------------- radar, radio, nerve */
+#radarBox { position: absolute; right: 26px; bottom: 26px; width: 168px; text-align: center; font-family: ui-monospace, 'Courier New', monospace; color: #7fd79a; transition: opacity .4s; filter: drop-shadow(0 0 10px rgba(60, 200, 110, .18)); }
+#radarBox.off { opacity: .12; }
+#radarBox.off canvas { visibility: hidden; }
+#radar { display: block; width: 168px; height: 168px; }
+#radarText { font-size: 11px; letter-spacing: .18em; margin-top: 6px; text-shadow: 0 0 6px rgba(80, 220, 130, .6); }
+#radarText.hot { color: #ff5a4a; text-shadow: 0 0 8px rgba(255, 60, 40, .8); animation: blink .5s steps(2) infinite; }
+#radarBox small { font-size: 9px; letter-spacing: .25em; opacity: .45; }
+#radioBox { position: absolute; right: 26px; bottom: 250px; width: 240px; text-align: right; font-family: ui-monospace, 'Courier New', monospace; font-size: 11px; letter-spacing: .2em; color: var(--dim); opacity: .45; transition: opacity .4s; }
+#radioBox.on { opacity: 1; color: #e0b866; }
+#radioBox small { margin-left: 8px; opacity: .5; font-size: 9px; }
+#radioBox .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #443c2c; margin-right: 8px; vertical-align: 1px; }
+#radioBox.on .dot { background: #ff5a3a; box-shadow: 0 0 8px #ff5a3a; animation: blink 1.2s steps(2) infinite; }
+#radioMsg { margin-top: 7px; font-style: italic; letter-spacing: .06em; font-size: 12.5px; line-height: 1.45; color: #cdbf9f; text-shadow: 0 0 8px rgba(224, 184, 102, .35); min-height: 1em; }
+#nerve { position: absolute; left: 50%; top: calc(50% + 74px); transform: translateX(-50%); width: 120px; text-align: center; opacity: 0; transition: opacity .35s; }
+#nerve.show { opacity: .9; }
+#nerve svg { width: 34px; height: 17px; fill: none; stroke: var(--bone); stroke-width: 1.6; }
+#nerve svg circle { fill: var(--bone); }
+#nerve.active svg { stroke: #9fd0ff; filter: drop-shadow(0 0 6px #9fd0ff); }
+#nerve.active svg circle { fill: #9fd0ff; }
+#nerve .bar { height: 2px; margin: 5px 0 4px; background: rgba(216, 207, 189, .18); }
+#nerve .bar i { display: block; height: 100%; background: #9fd0ff; transition: none; }
+#nerve.broken .bar i { background: var(--blood); }
+#nerve.broken svg { stroke: var(--blood); }
+#nerve small { font-size: 9px; letter-spacing: .3em; color: var(--dim); }
+.controls li.wide { flex-basis: 100%; color: #b9ad94; font-style: italic; }
+.controls li.wide b { border: 0; padding: 0; margin: 0; font-size: 13px; letter-spacing: .04em; color: #9fd0ff; }

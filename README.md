@@ -16,16 +16,31 @@ npm run dev      # http://localhost:5173
 | C / Ctrl | crouch (quiet, harder to see) |
 | F | torch on / off (battery drains — find spares) |
 | E / click | take, read, hide in a cabinet, unlock the doors |
+| V | switch first-person / third-person camera |
+| Q | ghost radar on / off |
+| R | hand radio on / off |
 | Esc | pause |
 
-**Goal:** read the Archivist's ledger, find the three keys hidden around the library (their places change every run), unlock the great doors at the south end and get out.
-Taking the first key wakes **the Archivist**. He hunts by sight (your torch gives you away from far off) and by sound (running). Break line of sight and hide in a cabinet — but if he sees you climb in, he will open it.
-The faceless **Hollow** appear at the gallery rail, at the edge of your light and across your path.
+**Goal:** read the ledger, find the three keys (their places change every run), unlock the great doors at the south end and get out.
+
+**The dead**
+
+- **The Archivist** walks. He wakes when you lift the first key, hunts by sight and sound, and opens cabinets he saw you enter.
+- **The Wraith** flies above the shelves and through them. It is drawn to torchlight: go dark and it loses you.
+- **The Crawler** scuttles on all fours under the tables. Nearly blind, but it hears everything.
+- **The Hollow** are apparitions: at the gallery rail, at the edge of your light, right behind you.
+
+No ghost hunts forever: each one gives up after a few seconds, only one hunts at a time, and they rest between hunts.
+**Look a ghost in the eyes** and hold its gaze: it slows, then freezes, then drifts away. Your nerve (the eye meter) runs out if you stare too long.
+
+**Tools:** the radar sweeps for contacts (red walker, blue flyer, orange crawler, gold = nearest key). The radio plays a warped waltz; its static swells when something is close and it sometimes mutters where a key is — but the dead can hear it too.
+
+Also in the dark: a thunderstorm with lightning through the great window, a bat colony, posters whose writing changes when you are not looking, and scares that escalate with every key.
 
 ## Project layout
 
 - `blender/` – map pipeline: `make_textures.py` (PBR texture sets), `kit.py` (modelling kit), `build_library.py` (builds the library, writes `library.blend`, the GLB and `level.json` with colliders, key spots, hiding places), `render_preview.py`.
 - `public/assets/` – optimised game assets (`library.glb`, the two characters, `level.json`).
-- `src/` – game: `main.js` (flow, HUD, scares, post-processing), `world.js` (lighting, candles, moon shafts, dust, doors, pickups), `player.js`, `ghost.js` (AI + spectral shading + animation retargeting), `nav.js` (grid A* and line of sight), `audio.js` (fully synthesised sound).
+- `src/` – game: `main.js` (flow, HUD, scares, storm, radio, post-processing), `extras.js` (bats, posters, radar), `world.js` (lighting, candles, moon shafts, dust, doors, pickups), `player.js`, `ghost.js` (AI + spectral shading + animation retargeting), `nav.js` (grid A* and line of sight), `audio.js` (fully synthesised sound).
 
 Rebuild the map with `npm run map` (needs `pip install bpy pillow numpy`).
