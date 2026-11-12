@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Hollow Archive</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- in-game HUD -->
+  <div id="hud" class="hidden">
+    <div id="objective"></div>
+    <div id="keys">
+      <svg class="key" viewBox="0 0 48 20"><circle cx="9" cy="10" r="6.5"/><path d="M15 10h28M36 10v7M42 10v6"/></svg>
+      <svg class="key" viewBox="0 0 48 20"><circle cx="9" cy="10" r="6.5"/><path d="M15 10h28M36 10v7M42 10v6"/></svg>
+      <svg class="key" viewBox="0 0 48 20"><circle cx="9" cy="10" r="6.5"/><path d="M15 10h28M36 10v7M42 10v6"/></svg>
+    </div>
+    <div id="crosshair"></div>
+    <div id="prompt"></div>
+    <div id="message"></div>
+    <div id="battery"><span class="label">TORCH</span><div class="bar"><i id="batteryFill"></i></div></div>
+    <div id="stamina"><i id="staminaFill"></i></div>
+    <div id="nerve"><svg viewBox="0 0 40 20"><path d="M2 10 Q20 -6 38 10 Q20 26 2 10Z"/><circle cx="20" cy="10" r="4.5"/></svg><div class="bar"><i id="nerveFill"></i></div><small>NERVE</small></div>
+    <div id="radioBox"><span class="dot"></span><b>RADIO</b><small>R</small><div id="radioMsg"></div></div>
+    <div id="radarBox"><canvas id="radar" width="168" height="168"></canvas><div id="radarText">NO CONTACT</div><small>Q · RADAR</small></div>
+    <div id="hideHint" class="hidden">Stay still. Stay quiet.<br /><small>E — step out</small></div>
+  </div>
+
+  <div id="hideMask"></div>
+  <div id="flash"></div>
+  <div id="scare"><img src="/assets/scare.jpg" alt="" /></div>
+  <div id="fade"></div>
+
+  <!-- readable ledger -->
+  <div id="note" class="overlay hidden">
+    <div class="parchment">
+      <h3>Ledger of the Archivist</h3>
+      <div id="noteText"></div>
+      <small>E / click — close</small>
+    </div>
+  </div>
+
+  <!-- title -->
+  <div id="menu" class="overlay">
+    <div class="menuInner">
+      <p class="eyebrow">a library that does not let go</p>
+      <h1>THE HOLLOW<br />ARCHIVE</h1>
+      <div id="loading"><div class="bar"><i id="loadFill"></i></div><span id="loadText">Lighting the candles…</span></div>
+      <button id="start" class="hidden">Enter the library</button>
+      <ul class="controls">
+        <li><b>W A S D</b> move</li><li><b>Mouse</b> look</li><li><b>Shift</b> run</li><li><b>C / Ctrl</b> crouch</li>
+        <li><b>F</b> torch</li><li><b>E</b> interact · hide</li><li><b>V</b> camera view</li><li><b>Q</b> ghost radar</li><li><b>R</b> radio</li><li><b>Esc</b> pause</li>
+        <li class="wide">Hold a ghost's gaze — <b>look into its eyes</b> — and it freezes</li>
+      </ul>
+      <div class="settings">
+        <label>Quality
+          <select id="quality"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+        </label>
+        <label>Mouse <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1" /></label>
+        <label>Volume <input id="vol" type="range" min="0" max="1" step="0.02" value="0.8" /></label>
+      </div>
+      <p class="warn">Headphones recommended. Contains flashing images, loud sounds and jump scares.</p>
+    </div>
+  </div>
+
+  <div id="pause" class="overlay hidden"><div class="menuInner"><h2>Paused</h2><button id="resume">Return</button><p class="warn">It is still looking for you.</p></div></div>
+  <div id="dead" class="overlay hidden"><div class="menuInner"><h2 class="red">You were shelved.</h2><p id="deadText">The Archivist adds another volume to his collection.</p><button id="retry">Try again</button></div></div>
+  <div id="won" class="overlay hidden"><div class="menuInner"><h2>You escaped.</h2><p id="wonText"></p><button id="again">Play again</button></div></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
