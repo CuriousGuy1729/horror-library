@@ -181,6 +181,97 @@ export class GameAudio {
     this.#noise(3.2, 'lowpass', 320, 0.8, 0.5 * vol, { delay: delay + 0.6, attack: 0.5, freqTo: 80, pan: Math.random() - 0.5 });
     this.#tone('sine', 48, 26, 3.0, 0.7 * vol, { delay: delay + 0.05 });
   }
+  /**
+   * A synthetic human voice: a buzzing glottal source pushed through three vowel formants.
+   * segs = [[startOffset, duration, pitchFrom, pitchTo, loudness], ...]; `vowel` = three formant frequencies.
+   */
+  #voice(segs, { vowel = [800, 1200, 2700], vol = 1, pan = 0, vib = 6, vibDepth = 0.02, rough = 0, breath = 0.25, delay = 0, dest = this.fx } = {}) {
+    if (!this.ready || vol < 0.01) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + delay, end = Math.max(...segs.map((x) => x[0] + x[1])) + 0.15;
+    const src = ctx.createOscillator(); src.type = 'sawtooth';
+    const sub = ctx.createOscillator(); sub.type = 'square'; const subG = ctx.createGain(); subG.gain.value = 0.25;
+    const amp = ctx.createGain(); amp.gain.setValueAtTime(0, t0);
+    const air = ctx.createBufferSource(); air.buffer = this.noiseBuf; air.loop = true; const airG = ctx.createGain(); airG.gain.value = breath;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = vib; const lg = ctx.createGain(); lfo.connect(lg); lg.connect(src.frequency); lg.connect(sub.frequency);
+    src.frequency.setValueAtTime(segs[0][2], t0); sub.frequency.setValueAtTime(segs[0][2] * 0.5, t0); lg.gain.setValueAtTime(segs[0][2] * vibDepth, t0);
+    for (const [o, d, f0, f1, l = 1] of segs) {
+      const a = t0 + o, at = Math.min(0.05, d * 0.3);
+      src.frequency.setValueAtTime(f0, a); src.frequency.exponentialRampToValueAtTime(f1, a + d);
+      sub.frequency.setValueAtTime(f0 * 0.5, a); sub.frequency.exponentialRampToValueAtTime(f1 * 0.5, a + d);
+      lg.gain.setValueAtTime(f0 * vibDepth, a);
+      amp.gain.setValueAtTime(0.0001, a); amp.gain.linearRampToValueAtTime(l, a + at); amp.gain.setValueAtTime(l, a + d * 0.6); amp.gain.exponentialRampToValueAtTime(0.0001, a + d);
+    }
+    src.connect(amp); sub.connect(subG).connect(amp); air.connect(airG).connect(amp);
+    let node = amp;
+    if (rough > 0) {          // a torn, ragged throat: fast amplitude flutter
+      const r = ctx.createGain(); r.gain.value = 1 - rough * 0.5; const ro = ctx.createOscillator(); ro.type = 'sawtooth'; ro.frequency.value = 58 + Math.random() * 30; const rg = ctx.createGain(); rg.gain.value = rough * 0.5;
+      ro.connect(rg).connect(r.gain); ro.start(t0); ro.stop(t0 + end); amp.connect(r); node = r;
+    }
+    const out = ctx.createGain(); out.gain.value = vol; const pn = ctx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, pan));
+    vowel.forEach((f, i) => { const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = [7, 9, 10][i]; const g = ctx.createGain(); g.gain.value = [1, 0.6, 0.3][i]; node.connect(b).connect(g).connect(out); });
+    out.connect(pn).connect(dest);
+    for (const n of [src, sub, lfo]) { n.start(t0); n.stop(t0 + end); }
+    air.start(t0, Math.random()); air.stop(t0 + end);
+  }
+  /** a woman weeping: hitching sobs that fall in pitch, then a long shaking breath out */
+  cry(vol = 1, pan = 0) {
+    if (!this.ready) return;
+    const segs = []; let t = 0; const base = 400 + Math.random() * 90;
+    const n = 3 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < n; i++) { const d = 0.16 + Math.random() * 0.1; segs.push([t, d, base * (1.18 - i * 0.05), base * (0.9 - i * 0.05), 0.9 - i * 0.08]); t += d + 0.07 + Math.random() * 0.06; }
+    segs.push([t + 0.1, 1.1 + Math.random() * 0.6, base * 1.05, base * 0.62, 0.8]);
+    this.#voice(segs, { vowel: [620, 1250, 2800], vol: 0.36 * vol, pan, vib: 7.5, vibDepth: 0.045, breath: 0.4 });
+    this.#noise(0.35, 'bandpass', 2200, 1.5, 0.05 * vol, { pan, attack: 0.1, delay: t + 1.6 });   // the sniff afterwards
+  }
+  /** a long, wailing lament */
+  lament(vol = 1, pan = 0) {
+    const b = 330 + Math.random() * 60;
+    this.#voice([[0, 1.5, b, b * 1.5, 0.8], [1.5, 1.9, b * 1.5, b * 1.12, 1], [3.5, 2.2, b * 1.2, b * 0.7, 0.7]], { vowel: [500, 950, 2700], vol: 0.3 * vol, pan, vib: 5.5, vibDepth: 0.05, breath: 0.3 });
+  }
+  /** a woman's shriek, close and ragged */
+  shriek(vol = 1, pan = 0) {
+    if (!this.ready) return;
+    const b = 720 + Math.random() * 160;
+    this.#voice([[0, 0.14, b * 0.6, b, 0.8], [0.14, 1.25, b * 1.05, b * 1.22, 1], [1.39, 0.55, b * 1.2, b * 0.55, 0.7]], { vowel: [1050, 1750, 3300], vol: 0.6 * vol, pan, vib: 9, vibDepth: 0.03, rough: 0.9, breath: 0.5 });
+    this.#noise(1.6, 'bandpass', 3200, 1.2, 0.14 * vol, { pan, attack: 0.05 });
+  }
+  /** a man shouting somewhere in the building — sometimes cut short */
+  shout(vol = 1, pan = 0) {
+    if (!this.ready) return;
+    const b = 150 + Math.random() * 50, cut = Math.random() < 0.4;
+    const segs = [[0, 0.5, b, b * 1.5, 1], [0.62, cut ? 0.35 : 1.3, b * 1.6, cut ? b * 1.7 : b * 0.85, 1]];
+    this.#voice(segs, { vowel: [730, 1150, 2500], vol: 0.5 * vol, pan, vib: 5, vibDepth: 0.02, rough: 0.7, breath: 0.35 });
+    if (cut) { this.#tone('sine', 90, 40, 0.3, 0.4 * vol, { pan, delay: 0.98 }); this.#noise(0.2, 'lowpass', 500, 1, 0.3 * vol, { pan, delay: 0.98 }); }
+  }
+  /** a low groan of pain */
+  moan(vol = 1, pan = 0) { const b = 95 + Math.random() * 30; this.#voice([[0, 2.4, b * 1.15, b * 0.8, 1]], { vowel: [450, 800, 2400], vol: 0.45 * vol, pan, vib: 4, vibDepth: 0.03, rough: 0.5, breath: 0.5 }); }
+  /** a child laughing, where there is no child */
+  giggle(vol = 1, pan = 0) {
+    const segs = []; let t = 0; const b = 560 + Math.random() * 120, n = 5 + ((Math.random() * 4) | 0);
+    for (let i = 0; i < n; i++) { segs.push([t, 0.09, b * (1.25 - i * 0.04), b * (1.0 - i * 0.04), 1 - i * 0.07]); t += 0.135 + i * 0.006; }
+    this.#voice(segs, { vowel: [900, 1900, 3200], vol: 0.3 * vol, pan, vib: 0, vibDepth: 0, breath: 0.5 });
+  }
+  /** a few sung notes of a hymn, slightly out of tune */
+  hymn(vol = 1, pan = 0) {
+    const notes = [0, 3, 2, 0, -2, 0], b = 392; let t = 0; const segs = [];
+    for (const n of notes) { const f = b * 2 ** (n / 12) * (1 + (Math.random() - 0.5) * 0.02); segs.push([t, 0.95, f, f * 0.995, 0.8]); t += 0.9; }
+    this.#voice(segs, { vowel: [400, 800, 2600], vol: 0.22 * vol, pan, vib: 5.5, vibDepth: 0.012, breath: 0.2 });
+  }
+  /** dry bones knocking together */
+  rattle(vol = 1, pan = 0) {
+    if (!this.ready || vol < 0.01) return;
+    const n = 2 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < n; i++) { const d = i * (0.035 + Math.random() * 0.04), f = 900 + Math.random() * 1500; this.#tone('triangle', f, f * 0.8, 0.045, 0.16 * vol, { pan, delay: d, attack: 0.001 }); this.#noise(0.02, 'bandpass', f * 1.8, 4, 0.12 * vol, { pan, delay: d, attack: 0.001 }); }
+  }
+  /** a rope snapping taut under a weight */
+  rope(vol = 1) { if (!this.ready) return; this.#tone('sine', 120, 40, 0.5, 0.7 * vol); this.#noise(0.1, 'bandpass', 1400, 2, 0.4 * vol); this.creak(2.2, 0, 0.9 * vol); this.#tone('sawtooth', 62, 58, 2.5, 0.08 * vol, { attack: 0.02 }); }
+  /** something dragged along the floorboards */
+  drag(vol = 1, pan = 0) { if (this.ready) for (let i = 0; i < 3; i++) this.#noise(0.9, 'bandpass', 260 + Math.random() * 120, 1.2, 0.22 * vol, { pan, attack: 0.3, delay: i * 1.25, freqTo: 180 }); }
+  /** a distant bell */
+  bell(vol = 1) { if (this.ready) [[196, 1], [392.5, 0.5], [466, 0.35], [588, 0.25], [785, 0.18], [1050, 0.08]].forEach(([f, g]) => this.#tone('sine', f, f * 0.998, 5.5, 0.13 * g * vol, { attack: 0.004 })); }
+  /** fingernails on glass or wood */
+  scratch(vol = 1, pan = 0) { if (this.ready) for (let i = 0; i < 4; i++) this.#noise(0.22 + Math.random() * 0.15, 'bandpass', 3000 + Math.random() * 1500, 6, 0.1 * vol, { pan, attack: 0.05, delay: i * 0.33 + Math.random() * 0.08, freqTo: 4200 }); }
+
   wail(vol = 1, pan = 0) {
     if (!this.ready) return;
     const ctx = this.ctx, t = ctx.currentTime, dur = 3.2;
@@ -274,12 +365,18 @@ export class GameAudio {
     // sparse random ambience: creaks, knocks, whispers from somewhere in the hall
     this.eventT -= dt;
     if (this.eventT <= 0 && s.ambient) {
-      this.eventT = 7 + Math.random() * 16;
-      const pan = Math.random() * 2 - 1, r = Math.random();
-      if (r < 0.4) this.creak(0.8 + Math.random() * 1.6, pan, 0.25);
-      else if (r < 0.6) this.knock(pan);
-      else if (r < 0.85) this.whisper(pan, 0.5);
-      else this.slam(pan, 0.25);
+      this.eventT = 5 + Math.random() * 11;
+      const pan = Math.random() * 2 - 1, far = 0.3 + Math.random() * 0.35;
+      // never the same thing twice in a row: the building is full of people who are not there
+      const pool = ['creak', 'creak', 'knock', 'whisper', 'whisper', 'slam', 'cry', 'cry', 'shout', 'moan', 'giggle', 'bell', 'scratch', 'drag', 'lament', 'hymn', 'shriek'];
+      let k; do k = pool[(Math.random() * pool.length) | 0]; while (k === this.lastEvent); this.lastEvent = k;
+      if (k === 'creak') this.creak(0.8 + Math.random() * 1.6, pan, 0.25);
+      else if (k === 'knock') this.knock(pan);
+      else if (k === 'whisper') this.whisper(pan, 0.5);
+      else if (k === 'slam') this.slam(pan, 0.25);
+      else if (k === 'shriek') this.shriek(0.22, pan);
+      else if (k === 'bell') this.bell(0.6);
+      else this[k](far, pan);
     }
   }
 }

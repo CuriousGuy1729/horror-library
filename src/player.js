@@ -34,12 +34,12 @@ export class Player {
   }
 
   /** a visible body for the third-person camera */
-  setBody(gltf) {
+  setBody(gltf, clips) {
     const b = this.body = gltf.scene; b.visible = false;
     b.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; if (o.material) { o.material.metalness = Math.min(o.material.metalness ?? 0, 0.3); o.material.roughness = Math.max(o.material.roughness ?? 1, 0.7); o.material.color?.multiplyScalar(0.75); } } });
     this.mixer = new THREE.AnimationMixer(b); this.acts = {};
-    for (const c of gltf.animations) { const a = this.mixer.clipAction(c); a.play(); a.setEffectiveWeight(c.name === 'Idle' ? 1 : 0); this.acts[c.name] = a; }
-    this.curAct = this.acts.Idle; b.scale.setScalar(0.94);
+    for (const c of clips || gltf.animations) { const a = this.mixer.clipAction(c); a.play(); a.setEffectiveWeight(c.name === 'Idle' ? 1 : 0); this.acts[c.name] = a; }
+    this.curAct = this.acts.Idle; this.bodyScale = clips ? 0.97 : 0.94; b.scale.setScalar(this.bodyScale);
     this.cam.parent.add(b);
   }
   toggleView() { this.view = this.view === 'first' ? 'third' : 'first'; return this.view; }
@@ -191,10 +191,11 @@ export class Player {
       b.visible = tp3;
       if (tp3) {
         b.position.set(this.pos.x, 0, this.pos.z); b.rotation.y = this.yaw + this.bodyFlip;
-        b.scale.set(0.94, 0.94 * (this.eye / EYE) ** 0.8, 0.94);
-        const next = this.acts[sp > 3.2 ? 'Run' : sp > 0.35 ? 'Walk' : 'Idle'];
+        const sneak = this.acts.Crouch && this.crouch && this.mode === 'free', bs = this.bodyScale;
+        b.scale.set(bs, sneak ? bs : bs * (this.eye / EYE) ** 0.8, bs);
+        const next = sneak ? this.acts.Crouch : this.acts[sp > 3.2 ? 'Run' : sp > 0.35 ? 'Walk' : 'Idle'];
         if (next && next !== this.curAct) { next.enabled = true; next.setEffectiveWeight(1); next.time = 0; this.curAct.crossFadeTo(next, 0.25, false); this.curAct = next; }
-        if (this.curAct) this.curAct.timeScale = this.curAct === this.acts.Walk ? Math.max(0.5, sp / 1.9) : this.curAct === this.acts.Run ? sp / 4.2 : 1;
+        if (this.curAct) this.curAct.timeScale = this.curAct === this.acts.Walk ? Math.max(0.5, sp / 1.9) : this.curAct === this.acts.Run ? sp / 4.2 : this.curAct === this.acts.Crouch ? Math.min(1.3, sp / 1.0) : 1;
         this.mixer.update(dt);
       }
     }

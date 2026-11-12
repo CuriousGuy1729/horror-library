@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneRig } from 'three/addons/utils/SkeletonUtils.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -10,7 +11,7 @@ import { World } from './world.js';
 import { Nav } from './nav.js';
 import { Player } from './player.js';
 import { GameAudio } from './audio.js';
-import { Archivist, Hollow, Wraith, retargetClips } from './ghost.js';
+import { Hanged, Archivist, Hollow, Wraith, retargetClips } from './ghost.js';
 import { Bats, Posters, Radar } from './extras.js';
 
 const $ = (id) => document.getElementById(id);
@@ -75,23 +76,31 @@ addEventListener('resize', () => {
 const assets = {};
 async function load() {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  const prog = [0, 0, 0, 0, 0], weights = [0.6, 0.12, 0.18, 0.05, 0.05];
-  const upd = () => { ui.loadFill.style.width = Math.round(prog.reduce((a, p, i) => a + p * weights[i], 0) * 100) + '%'; };
+  const files = [['lib', 'library.glb', 0.5], ['arch', 'archivist.glb', 0.12], ['hol', 'hollow.glb', 0.16], ['crawl', 'crawler.glb', 0.04], ['man', 'human_m.glb', 0.03], ['woman', 'human_f.glb', 0.03],
+    ['aIdle', 'anim/m_idle.glb', 0.02], ['aWalk', 'anim/m_walk.glb', 0.02], ['aRun', 'anim/m_run.glb', 0.02], ['aCrouch', 'anim/m_crouch.glb', 0.02], ['fIdle', 'anim/f_idle.glb', 0.04]];
+  const prog = files.map(() => 0);
+  const upd = () => { ui.loadFill.style.width = Math.round(prog.reduce((a, p, i) => a + p * files[i][2], 0) * 100) + '%'; };
   const get = (url, i) => loader.loadAsync(url, (e) => { prog[i] = e.total ? e.loaded / e.total : Math.min(0.95, e.loaded / 6e6); upd(); }).then((g) => { prog[i] = 1; upd(); return g; });
-  const [lib, arch, hol, crawl, body, level] = await Promise.all([
-    get('/assets/library.glb', 0), get('/assets/archivist.glb', 1), get('/assets/hollow.glb', 2), get('/assets/crawler.glb', 3), get('/assets/player.glb', 4), fetch('/assets/level.json').then((r) => r.json()),
-  ]);
-  Object.assign(assets, { lib, arch, hol, crawl, body, level });
+  const [level, ...glbs] = await Promise.all([fetch('/assets/level.json').then((r) => r.json()), ...files.map((f, i) => get('/assets/' + f[1], i))]);
+  assets.level = level; files.forEach((f, i) => { assets[f[0]] = glbs[i]; });
   ui.loading.classList.add('hidden'); ui.start.classList.remove('hidden');
 }
 load().catch((e) => { console.error(e); ui.loadText.textContent = 'Could not load the library — ' + e.message; });
 
 // ---------------------------------------------------------------------------- game state
-let world, nav, player, archivist, crawler, wraith, ghosts = [], hollow, level, bats, posters, radar, hemi;
+let world, nav, player, archivist, crawler, wraith, nun, skeleton, hanged, ghosts = [], hollow, level, bats, posters, radar, hemi;
 let state = 'menu';            // menu | playing | paused | dying | dead | won
 let noLock = false, dragging = false;
 let G = null;                  // per-run state
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
+
+/** takes the single clip out of an animation-only GLB, renames it and pins the hips in place (no root motion) */
+function named(gltf, name) {
+  const c = gltf.animations[0]; c.name = name;
+  for (const t of c.tracks) if (/Hips\.position$/.test(t.name)) for (let i = 3; i < t.values.length; i += 3) { t.values[i] = t.values[0]; t.values[i + 2] = t.values[2]; }
+  c.tracks = c.tracks.filter((t) => !/\.scale$/.test(t.name) && (!/\.position$/.test(t.name) || /Hips\.position$/.test(t.name)));
+  return c;
+}
 
 function build() {
   quality = ui.quality.value; level = assets.level;
@@ -107,15 +116,19 @@ function build() {
   archivist = new Archivist(scene, assets.arch, archClips, nav, audio);
   crawler = new Archivist(scene, assets.crawl, [], nav, audio, { kind: 'crawler', speed: 1.1, sight: 0.6, hear: 1.9, reach: 1.15 });
   wraith = new Wraith(scene, audio);
-  ghosts = [archivist, crawler, wraith];
+  // the weeping sister glides (idle only: her skirt hides the legs); the bone man walks on the mannequin's clips
+  nun = new Archivist(scene, assets.woman, [named(assets.fIdle, 'idle')], nav, audio, { kind: 'nun', speed: 0.82, sight: 0.6, hear: 0.75, reach: 1.0, linger: 3 });
+  skeleton = new Archivist(scene, { scene: cloneRig(assets.hol.scene) }, clips, nav, audio, { kind: 'skeleton', speed: 0.93, sight: 0.85, hear: 1.1, reach: 1.05 });
+  hanged = new Hanged(scene, cloneRig(assets.hol.scene), assets.hol.animations);
+  ghosts = [archivist, crawler, wraith, nun, skeleton];
   hollow = new Hollow(scene, assets.hol.scene, assets.hol.animations);
-  player.setBody(assets.body);
+  player.setBody(assets.man, [named(assets.aIdle, 'Idle'), named(assets.aWalk, 'Walk'), named(assets.aRun, 'Run'), named(assets.aCrouch, 'Crouch')]);
   bats = new Bats(scene, 40); posters = new Posters(scene, renderer); radar = new Radar(ui.radar, ui.radarText);
   scene.traverse((o) => { if (o.isHemisphereLight) hemi = o; });
-  const alertLine = { archivist: 'RUN.', crawler: 'IT IS UNDER THE TABLES. RUN.', wraith: 'ABOVE YOU. KILL THE LIGHT.' };
+  const alertLine = { archivist: 'RUN.', crawler: 'IT IS UNDER THE TABLES. RUN.', wraith: 'ABOVE YOU. KILL THE LIGHT.', nun: 'SHE HAS STOPPED CRYING. RUN.', skeleton: 'THE BONES ARE COMING. RUN.' };
   for (const g of ghosts) {
     g.canHunt = (me) => G.huntCool <= 0 && !ghosts.some((o) => o !== me && o.hunting);   // only one of them hunts at a time
-    g.onAlert = (me) => { say(alertLine[me.kind], 1.8); player.shake = Math.max(player.shake, 0.5); if (me.kind === 'crawler') audio.growl(1, panTo(me.pos.x, me.pos.z)); };
+    g.onAlert = (me) => { say(alertLine[me.kind], 1.8); player.shake = Math.max(player.shake, 0.5); const pan = panTo(me.pos.x, me.pos.z); if (me.kind === 'crawler') audio.growl(1, pan); else if (me.kind === 'nun') audio.shriek(0.9, pan); else if (me.kind === 'skeleton') { for (let i = 0; i < 6; i++) setTimeout(() => audio.rattle(1, pan), i * 90); audio.moan(1, pan); } };
     g.onGiveUp = () => { G.huntCool = 9 + Math.random() * 6; if (state === 'playing') say('It has lost interest… for now.', 3); };
     g.onDazed = (me) => { G.huntCool = 12; G.stares++; say('It cannot look away. Go — quietly.', 3.5); audio.whisper(panTo(me.pos.x, me.pos.z), 1); };
   }
@@ -123,15 +136,19 @@ function build() {
 }
 
 function newRun() {
-  world.reset(); for (const g of ghosts) g.reset(); hollow.hide(); posters.reset();
+  world.reset(); for (const g of ghosts) g.reset(); hollow.hide(); hanged.hide(); posters.reset();
   crawler.inner.rotation.x = Math.PI / 2; crawler.inner.position.set(0, 0.3, -0.8);
   player.reset({ x: level.playerSpawn[0], z: level.playerSpawn[2] });
   player.sens = +ui.sens.value;
   const hints = world.spawnItems();
+  // two of the dead are already walking the hall before anything is touched
+  const sp = { x: level.playerSpawn[0], z: level.playerSpawn[2] };
+  nun.spawn({ x: level.ghostSpawn[0], z: level.ghostSpawn[2] });
+  skeleton.spawn(nav.randomPoint(sp, 20, 34));
   G = {
-    time: 0, hints, noteRead: false, noteOpen: false, awake: false, awakeT: -1, exit: 'locked', exitT: 0, fear: 0, hurt: 0,
-    scareT: 22 + Math.random() * 10, lastScare: '', ev: null, dieT: 0, hides: 0, scares: 0, target: null, msgT: 0, peekT: 0, batteriesWarned: false,
-    huntCool: 0, awakeAt: 0, stares: 0, nerveBroken: false, staring: false, flashT: 0, flashDur: 1, stormT: 14 + Math.random() * 12, pingT: 0, radioT: 12, killer: null, staredHint: false, tipT: 9,
+    cryT: 5, introT: 7, time: 0, hints, noteRead: false, noteOpen: false, awake: false, awakeT: -1, exit: 'locked', exitT: 0, fear: 0, hurt: 0,
+    scareT: 14 + Math.random() * 14, lastScare: '', ev: null, dieT: 0, hides: 0, scares: 0, target: null, msgT: 0, peekT: 0, batteriesWarned: false,
+    huntCool: 28, awakeAt: 0, stares: 0, nerveBroken: false, staring: false, flashT: 0, flashDur: 1, stormT: 14 + Math.random() * 12, pingT: 0, radioT: 12, killer: null, staredHint: false, tipT: 9,
   };
   ui.noteText.innerHTML = '<p><i>The doors are sealed with three locks. I have hidden the keys where no reader would think to look:</i></p><ul>' +
     hints.map((h) => `<li>One lies ${h}.</li>`).join('') + '</ul><p><i>Should you take one, I will know. Put out your light when you hear me. Stand inside the cabinets and do not breathe.</i></p>';
@@ -308,7 +325,7 @@ function updateRadio(dt) {
   if (near) {
     const d = near.pos.distanceTo(player.pos), side = panTo(near.pos.x, near.pos.z);
     const where = d < 6 ? 'right beside you' : side < -0.4 ? 'to your left' : side > 0.4 ? 'to your right' : 'close';
-    opts.push([`…${near.kind === 'wraith' ? 'above' : near.kind === 'crawler' ? 'on the floor' : 'walking'}… ${where}… ${d.toFixed(0)} metres…`, where], ['…look it in the eyes… it cannot bear to be seen…', 'look it in the eyes'], ['…we were readers too… kssh… do not run…', 'we were readers too']);
+    opts.push([`…${near.kind === 'wraith' ? 'above' : near.kind === 'crawler' ? 'on the floor' : near.kind === 'nun' ? 'weeping' : near.kind === 'skeleton' ? 'bones' : 'walking'}… ${where}… ${d.toFixed(0)} metres…`, where], ['…look it in the eyes… it cannot bear to be seen…', 'look it in the eyes'], ['…we were readers too… kssh… do not run…', 'we were readers too']);
   } else opts.push(['…is someone there?… kssh… put the key back…', 'is someone there'], ['…he is still reading… do not wake him…', 'do not wake him']);
   const [txt, voice] = opts[(Math.random() * opts.length) | 0];
   ui.radioMsg.textContent = txt; audio.radioVoice(); speak(voice);
@@ -342,12 +359,12 @@ function endEvent(vanishSound = true) {
   hollow.hide(); G.ev = null;
 }
 function lookingAt(p, cone) { camera.getWorldDirection(_a); _b.copy(p).sub(camera.position).normalize(); return _a.dot(_b) > cone; }
-function tier() { return !G.awake ? 0 : Math.min(3, player.keysHeld + (G.time - G.awakeAt > 150 ? 1 : 0)); }
+function tier() { return Math.min(3, player.keysHeld + Math.floor(G.time / 110)); }
 const POOLS = [
-  ['slam', 'bats', 'lightning', 'watcher', 'poster'],
-  ['slam', 'bats', 'silhouette', 'watcher', 'poster', 'aisle', 'dash', 'blowout'],
-  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'radar', 'aisle'],
-  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'behind', 'radar', 'face'],
+  ['slam', 'bats', 'lightning', 'watcher', 'poster', 'shriek', 'sob', 'giggle', 'hanged', 'aisle', 'shout'],
+  ['slam', 'bats', 'silhouette', 'watcher', 'poster', 'aisle', 'dash', 'blowout', 'shriek', 'hanged', 'giggle', 'sob', 'shout'],
+  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'radar', 'aisle', 'shriek', 'hanged', 'sob', 'face'],
+  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'behind', 'radar', 'face', 'shriek', 'hanged', 'giggle'],
 ];
 
 function startScare(force) {
@@ -420,6 +437,36 @@ function startScare(force) {
       radar.glitch = 2.6; for (let i = 0; i < 7; i++) setTimeout(() => state === 'playing' && audio.ping(1), i * 150);
       G.fear = Math.max(G.fear, 0.7); G.scares++; return true;
     }
+    case 'hanged': {       // a body drops out of the dark on a rope, right in front of you
+      let q = null;
+      for (const d of [2.4, 1.9, 3.0]) { const x = p.x + fx * d, z = p.z + fz * d; if (nav.free(x, z) && nav.walkLos(p.x, p.z, x, z)) { q = { x, z }; break; } }
+      if (!q) return false;
+      hanged.drop(q.x, q.z, Math.atan2(p.x - q.x, p.z - q.z));
+      audio.rope(1); audio.sting(0.8); setTimeout(() => state === 'playing' && audio.moan(0.9, 0), 500);
+      player.shake = Math.max(player.shake, 0.75); G.fear = 1; G.scares++; flash(0.3, 180);
+      return true;
+    }
+    case 'shriek': {       // a woman screams, right at your shoulder
+      const pan = Math.random() < 0.5 ? -0.85 : 0.85;
+      audio.shriek(1, pan); player.shake = Math.max(player.shake, 0.6); player.flick = 0.1; G.fear = Math.max(G.fear, 0.9); G.scares++;
+      return true;
+    }
+    case 'sob': {          // someone is crying very close by. There is nobody there.
+      const pan = Math.random() * 1.6 - 0.8;
+      audio.cry(1.5, pan); setTimeout(() => state === 'playing' && audio.whisper(-pan, 1), 2600); G.fear = Math.max(G.fear, 0.5);
+      return true;
+    }
+    case 'giggle': {       // a child laughs and runs past in the dark
+      const pan = Math.random() < 0.5 ? -1 : 1;
+      audio.giggle(1.3, pan); for (let i = 0; i < 7; i++) setTimeout(() => state === 'playing' && audio.ghostStep(0.9 - i * 0.1, pan * (1 - i * 0.3)), 500 + i * 140);
+      G.fear = Math.max(G.fear, 0.55); return true;
+    }
+    case 'shout': {        // a man shouts from the far end of the hall — and is cut off
+      const pan = Math.random() * 2 - 1;
+      audio.shout(1, pan); G.fear = Math.max(G.fear, 0.5);
+      for (const g of [nun, skeleton, archivist]) if (g.active && !g.hunting && Math.random() < 0.3) g.investigate(p.x + pan * 8, p.z);
+      return true;
+    }
     case 'face': {         // a face, for a single frame
       player.flick = 0.02; G.peekT = 0.12; return true;
     }
@@ -445,7 +492,7 @@ function updateHaunting(dt) {
     G.scareT -= dt;
     if (G.scareT <= 0) {
       if (!startScare()) G.scareT = 3;
-      else { const t = tier(); G.scareT = 26 - t * 5 + Math.random() * (22 - t * 4); if (G.ev) hollow.setOpacity(0); }
+      else { const t = tier(); G.scareT = (Math.random() < 0.18 ? 4 : 11 - t * 2) + Math.random() * (30 - t * 5); if (G.ev) hollow.setOpacity(0); }   // irregular on purpose: sometimes two come back to back
     }
     return;
   }
@@ -507,10 +554,11 @@ function die(killer = archivist) {
   if (killer.kind === 'wraith') { killer.pos.y = player.eye - 1.66; killer.vel.set(0, 0, 0); }
   else if (killer.kind === 'crawler') { killer.inner.rotation.x = 0.35; killer.inner.position.set(0, 0.25, -0.15); }   // it rears up off the floor
   else killer.play('headShake', 0.05, 2.4);
+  hanged.hide();
   killer.setOpacity(1); killer.light.intensity = 5;
   player.lookLock = new THREE.Vector3(); player.shake = 1.2; player.fovKick = -16; player.mode = player.mode === 'free' ? 'caught' : player.mode;
   ui.hideMask.classList.remove('on'); ui.hideHint.classList.add('hidden'); ui.prompt.classList.remove('show'); ui.nerve.classList.remove('show');
-  audio.scream(1); if (killer.kind === 'crawler') audio.growl(1, 0); flash(0.9, 260);
+  audio.scream(1); if (killer.kind === 'crawler') audio.growl(1, 0); if (killer.kind === 'nun') audio.shriek(1, 0); if (killer.kind === 'skeleton') for (let i = 0; i < 10; i++) setTimeout(() => audio.rattle(1, 0), i * 80); flash(0.9, 260);
 }
 function updateDying(dt) {
   const k = G.killer || archivist;
@@ -528,6 +576,8 @@ function updateDying(dt) {
     const lines = {
       archivist: ['The Archivist adds another volume to his collection.', 'You are catalogued. You are shelved. You are quiet now.', 'Overdue. Forever.', 'He closes the book. You are inside it.'],
       crawler: ['It drags you under the tables. There is room for one more.', 'You never heard it until its fingers closed around your ankle.'],
+      nun: ['She was not weeping for herself. She was weeping for you.', 'Sister Agnes folds your hands for you. She has had practice.', 'You hear her crying again. From inside your own chest.'],
+      skeleton: ['He only wanted his skin back. Yours fits well enough.', 'The bones are quiet now. There are more of them than before.'],
       wraith: ['The light went out. Then it was wearing your face.', 'You should not have looked up.'],
     }[k.kind];
     ui.deadText.textContent = `${lines[(Math.random() * lines.length) | 0]}  —  ${player.keysHeld} of 3 keys found.`;
@@ -558,6 +608,14 @@ function updatePlaying(dt) {
       setTimeout(() => state === 'playing' && say('Hide in the cabinets (E), kill your torch (F) — or look it dead in the eyes.', 6.5), 4600);
     }
   }
+  if (G.introT > 0) { G.introT -= dt; if (G.introT <= 0) say('You are not alone. Someone is weeping in the dark — and something dry is walking.', 5.5); }
+  // the sister weeps as she wanders; follow the sound, or stay away from it
+  G.cryT -= dt;
+  if (G.cryT <= 0 && nun.active) {
+    G.cryT = 5 + Math.random() * 7;
+    if (!nun.hunting && nun.state !== 'dazed') { const d = nun.pos.distanceTo(player.pos), v = Math.max(0, 1 - d / 26), pan = panTo(nun.pos.x, nun.pos.z); if (Math.random() < 0.2) audio.hymn(v * 1.4, pan); else audio.cry(v * v * 1.6 + 0.04, pan); }
+  }
+  hanged.update(dt, G.time);
   // the others arrive as the night goes on
   if (G.awake) {
     const el = G.time - G.awakeAt;
@@ -648,4 +706,4 @@ function frame() {
 }
 frame();
 
-if (import.meta.env.DEV) window.__ha = { get s() { return { state, G, world, nav, player, archivist, crawler, wraith, ghosts, hollow, level, camera, renderer, bats, posters, radar }; }, die, interact, startScare, updatePlaying, updateDying, findTarget, lightning, toggleRadio };
+if (import.meta.env.DEV) window.__ha = { get s() { return { state, G, world, nav, player, archivist, crawler, wraith, nun, skeleton, hanged, ghosts, hollow, level, camera, renderer, bats, posters, radar }; }, die, interact, startScare, updatePlaying, updateDying, findTarget, lightning, toggleRadio };

@@ -28,6 +28,15 @@ npm run dev      # http://localhost:5173
 - **The Archivist** walks. He wakes when you lift the first key, hunts by sight and sound, and opens cabinets he saw you enter.
 - **The Wraith** flies above the shelves and through them. It is drawn to torchlight: go dark and it loses you.
 - **The Crawler** scuttles on all fours under the tables. Nearly blind, but it hears everything.
+- **The Weeping Sister** is in the hall from the first second. She glides slowly and sees badly; you can hear her crying (and sometimes singing) long before you see her. When the crying stops, run.
+- **The Bone Man**, a walking skeleton, also patrols from the start. You hear his bones rattle as he moves.
+- **The Hanged** is not a hunter: now and then a body drops out of the dark on a rope right in front of you.
+
+Jumpscares come at irregular intervals from the start of a run, whether or not you have found a key. The hall is also full of voices: sobbing, distant shouts, screams, a child's laugh, a bell, scratching and dragging. All sound is synthesised in the browser.
+
+## Assets and licences
+
+The player body (`human_m.glb`), the Sister (`human_f.glb`) and the clips in `public/assets/anim/` come from the [Ready Player Me animation library](https://github.com/readyplayerme/animation-library). Its licence allows the animations to be used only with Ready Player Me avatars and does not allow redistributing them without consent, so check it before publishing or reusing these files.
 - **The Hollow** are apparitions: at the gallery rail, at the edge of your light, right behind you.
 
 No ghost hunts forever: each one gives up after a few seconds, only one hunts at a time, and they rest between hunts.
