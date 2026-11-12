@@ -251,7 +251,10 @@ export class Archivist extends Figure {
     if (face) { face.l.z += 0.012; face.r.z += 0.012; }
     root.traverse((o) => {
       if (!o.isMesh) return;
-      const m = spectral(o.material, { glow: 0.3, rim: 0.5, sat: 0.0, tint: [0.5, 0.5, 0.52], opacity: 1, face, habitY: neckY + 0.02, bind: o.bindMatrix });
+      // the mesh is stored quantised: this matrix takes a raw vertex to its rest position in metres, where the eyes were measured
+      let bind = o.bindMatrix;
+      if (o.skeleton) { const i = o.skeleton.bones.indexOf(head); if (i >= 0) bind = new THREE.Matrix4().multiplyMatrices(head.matrixWorld, o.skeleton.boneInverses[i]).multiply(o.bindMatrix); }
+      const m = spectral(o.material, { glow: 0.3, rim: 0.5, sat: 0.0, tint: [0.5, 0.5, 0.52], opacity: 1, face, habitY: neckY + 0.02, bind });
       m.userData.baseOpacity = 1; o.material = m; this.mats.push(m);
     });
     const black = new THREE.MeshStandardMaterial({ color: 0x030303, roughness: 1, side: THREE.DoubleSide, transparent: true, envMapIntensity: 0 });

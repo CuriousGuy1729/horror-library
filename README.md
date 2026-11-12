@@ -46,6 +46,15 @@ No ghost hunts forever: each one gives up after a few seconds, only one hunts at
 
 Also in the dark: a thunderstorm with lightning through the great window, a bat colony, posters whose writing changes when you are not looking, and scares that escalate with every key.
 
+## Trailer
+
+Open the game with `?trailer` added to the address (for example `http://localhost:5173/?trailer`), or use the "Watch the trailer" link on the menu. It plays a 66-second cinematic rendered live by the game: scripted camera moves, every ghost, captions and the game's own sound.
+
+- **Play the trailer** just plays it. Press Esc to stop.
+- **Record the trailer** asks the browser to share this tab, plays the trailer, and downloads `the-hollow-archive-trailer.webm` when it ends. Use Chrome or Edge, pick "This tab", and go fullscreen (F11) first. Any screen recorder (OBS, Xbox Game Bar) works too.
+
+The shot list is in `src/trailer.js`.
+
 ## Project layout
 
 - `blender/` – map pipeline: `make_textures.py` (PBR texture sets), `kit.py` (modelling kit), `build_library.py` (builds the library, writes `library.blend`, the GLB and `level.json` with colliders, key spots, hiding places), `render_preview.py`.

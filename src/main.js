@@ -11,6 +11,7 @@ import { World } from './world.js';
 import { Nav } from './nav.js';
 import { Player } from './player.js';
 import { GameAudio } from './audio.js';
+import { createTrailer } from './trailer.js';
 import { Hanged, Archivist, Hollow, Wraith, retargetClips } from './ghost.js';
 import { Bats, Posters, Radar } from './extras.js';
 
@@ -188,7 +189,46 @@ function startGame() {
 function pause() { if (state !== 'playing') return; state = 'paused'; ui.pause.classList.remove('hidden'); audio.suspend(); player.keys = {}; if (document.pointerLockElement) document.exitPointerLock(); }
 function resume() { if (state !== 'paused') return; state = 'playing'; ui.pause.classList.add('hidden'); audio.resume(); lock(); }
 
-ui.start.onclick = startGame; $('retry').onclick = startGame; $('again').onclick = startGame; $('resume').onclick = resume;
+// ---------------------------------------------------------------------------- trailer (open the page with ?trailer)
+let trailer = null;
+const TRAILER = new URLSearchParams(location.search).has('trailer');
+async function startTrailer(withRecording) {
+  audio.init(); audio.setVolume(+ui.vol.value); audio.resume();
+  let finish = null;
+  if (!world) { try { build(); } catch (e) { console.error(e); ui.start.textContent = 'Failed: ' + e.message; return; } }
+  trailer ||= createTrailer({
+    camera, audio, world, player, hanged, bats, level, ghosts: { archivist, crawler, wraith, nun, skeleton },
+    lightning, flash, scareEl: ui.scare, setFear: (f) => { G.fear = f; },
+  });
+  if (withRecording) { try { finish = await trailer.record(); } catch (e) { $('trlNote').textContent = 'Recording was not started: ' + e.message; return; } }
+  newRun(); for (const g of ghosts) g.reset();
+  G.stormT = 1e9; G.fear = 0;
+  for (const o of [ui.menu, ui.dead, ui.won, ui.pause, ui.note, ui.hud]) o.classList.add('hidden');
+  ui.fade.classList.remove('on', 'white');
+  audio.startAmbience(); audio.startScore();
+  state = 'trailer';
+  trailer.start(async () => { state = 'menu'; ui.menu.classList.remove('hidden'); audio.update(0.016, { ghostDist: 99, ghostActive: false, chase: false, ghostPan: 0, fear: 0, ambient: false, tension: 0, staticLevel: 0, winded: 0 }); await finish?.(); });
+}
+function updateTrailer(dt) {
+  G.time += dt;
+  trailer.update(dt);
+  if (state !== 'trailer') return;
+  updateStorm(dt);
+  world.update(dt, camera, player.torchState); bats.update(dt, G.time);
+  audio.update(dt, { ghostDist: 99, ghostActive: G.fear > 0.3, chase: G.fear > 0.95, ghostPan: 0, fear: G.fear * 0.8, ambient: false, tension: Math.max(0.3, G.fear), staticLevel: 0, winded: 0 });
+}
+if (!TRAILER) { const l = document.createElement('a'); l.href = '?trailer'; l.textContent = 'Watch the trailer'; l.style.cssText = 'display:block;margin-top:14px;color:#a39a86;font-size:13px;letter-spacing:.25em;text-transform:uppercase;text-decoration:none'; document.querySelector('.settings')?.after(l); }
+if (TRAILER) {
+  document.querySelector('.controls')?.classList.add('hidden'); document.querySelector('.settings')?.classList.add('hidden');
+  ui.start.textContent = 'Play the trailer';
+  const box = document.createElement('div'); box.id = 'trlMenu';
+  box.innerHTML = '<button id="trlRecBtn" class="hidden">Record the trailer</button><button id="trlPlayBtn" class="hidden">Play the game</button>';
+  const note = document.createElement('p'); note.id = 'trlNote'; note.textContent = 'Best in fullscreen (F11). “Record” asks to share this tab, then saves a .webm video when the trailer ends.';
+  ui.start.after(box, note);
+  new MutationObserver(() => { const on = !ui.start.classList.contains('hidden'); $('trlRecBtn').classList.toggle('hidden', !on); $('trlPlayBtn').classList.toggle('hidden', !on); }).observe(ui.start, { attributes: true, attributeFilter: ['class'] });
+  $('trlRecBtn').onclick = () => startTrailer(true); $('trlPlayBtn').onclick = () => { location.search = ''; };
+}
+ui.start.onclick = TRAILER ? () => startTrailer(false) : startGame; $('retry').onclick = startGame; $('again').onclick = startGame; $('resume').onclick = resume;
 ui.quality.onchange = () => { store.set('ha.q', ui.quality.value); if (world) location.reload(); };
 ui.sens.oninput = () => { store.set('ha.s', ui.sens.value); if (player) player.sens = +ui.sens.value; };
 ui.vol.oninput = () => { store.set('ha.v', ui.vol.value); audio.setVolume(+ui.vol.value); };
@@ -197,6 +237,7 @@ document.addEventListener('pointerlockchange', () => { if (!document.pointerLock
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
 addEventListener('keydown', (e) => {
+  if (state === 'trailer') { if (e.code === 'Escape') trailer.stop(); return; }
   if (state === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) { resume(); return; }
   if (state !== 'playing') return;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ControlLeft', 'Tab'].includes(e.code)) e.preventDefault();
@@ -698,6 +739,7 @@ function frame() {
   if (!world) return;
   if (state === 'playing') updatePlaying(dt);
   else if (state === 'dying') updateDying(dt);
+  else if (state === 'trailer') updateTrailer(dt);
   else if (state === 'won') { world.update(dt, camera, player.torchState); }
   else if (state === 'paused') return;
   grade.uniforms.uTime.value = performance.now() / 1000 % 100;
@@ -706,4 +748,4 @@ function frame() {
 }
 frame();
 
-if (import.meta.env.DEV) window.__ha = { get s() { return { state, G, world, nav, player, archivist, crawler, wraith, nun, skeleton, hanged, ghosts, hollow, level, camera, renderer, bats, posters, radar }; }, die, interact, startScare, updatePlaying, updateDying, findTarget, lightning, toggleRadio };
+if (import.meta.env.DEV) window.__ha = { startTrailer, updateTrailer, get trailer() { return trailer; }, get s() { return { state, G, world, nav, player, archivist, crawler, wraith, nun, skeleton, hanged, ghosts, hollow, level, camera, renderer, bats, posters, radar }; }, die, interact, startScare, updatePlaying, updateDying, findTarget, lightning, toggleRadio };
