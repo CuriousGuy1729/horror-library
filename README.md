@@ -18,7 +18,10 @@ npm run dev      # http://localhost:5173
 | E / click | take, read, hide in a cabinet, unlock the doors |
 | V | switch first-person / third-person camera |
 | Q | ghost radar on / off |
-| R | hand radio on / off |
+| R | spirit box (hand radio) on / off — it crackles and speaks when something is near |
+| T | EMF meter on / off — five lamps, 1 (nothing) to 5 (it is beside you) |
+| M | microphone on / off — the house hears you (see below) |
+| G | throw a book: the noise draws whatever is hunting to where it lands |
 | Esc | pause |
 
 **Goal:** read the ledger, find the three keys (their places change every run), unlock the great doors at the south end and get out.
@@ -30,11 +33,25 @@ npm run dev      # http://localhost:5173
 - **The Crawler** scuttles on all fours under the tables. Nearly blind, but it hears everything.
 - **The Weeping Sister** is in the hall from the first second. She glides slowly and sees badly; you can hear her crying (and sometimes singing) long before you see her. When the crying stops, run.
 - **The Bone Man**, a walking skeleton, also patrols from the start. You hear his bones rattle as he moves.
+- **The Lost Child** arrives after the first key. Small, pale, laughing among the shelves; she wanders more than she hunts.
+- **The Shadow** comes late. A black silhouette with red eyes that only moves while you are *not* looking at it. Keep your light and your eyes on it and it stands still; hold the stare for a few seconds and it comes apart.
 - **The Hanged** is not a hunter: now and then a body drops out of the dark on a rope right in front of you.
 
 Jumpscares come at irregular intervals from the start of a run, whether or not you have found a key. The hall is also full of voices: sobbing, distant shouts, screams, a child's laugh, a bell, scratching and dragging. All sound is synthesised in the browser.
 
+**Tools and talking to the dead**
+
+- You carry an **EMF meter** in the left hand and a **spirit box** in the right (first person). The meter climbs and beeps faster as a ghost closes in.
+- With the **microphone** on (the browser asks for permission; audio never leaves your machine), the game listens to how loud you are. Stay quiet and you are harder to find. Shout and the nearest ghost comes to look. Speak with the spirit box on, then pause, and something answers through the static.
+- Stare a ghost down with the torch to daze it, throw books to lead it away, and light or pinch out candles with **E**.
+- Ghosts now investigate first and hunt rarely: after a chase ends they leave you alone for a good while.
+
+The layout adapts to the window: small windows, phones in landscape and very wide screens all get a scaled HUD and menu (the game still needs a keyboard and mouse).
+
 ## Assets and licences
+
+- Recorded sounds (footsteps on creaking boards, whispers, screams, ambience, stingers) are CC0 recordings by Freesound authors, collected via `mayerwin/halloween-soundboard`. Every file and its author is listed in `public/assets/sfx/CREDITS.md`. Synthesised sound remains as a fallback.
+
 
 The player body (`human_m.glb`), the Sister (`human_f.glb`) and the clips in `public/assets/anim/` come from the [Ready Player Me animation library](https://github.com/readyplayerme/animation-library). Its licence allows the animations to be used only with Ready Player Me avatars and does not allow redistributing them without consent, so check it before publishing or reusing these files.
 - **The Hollow** are apparitions: at the gallery rail, at the edge of your light, right behind you.

@@ -12,6 +12,7 @@ import { Nav } from './nav.js';
 import { Player } from './player.js';
 import { GameAudio } from './audio.js';
 import { createTrailer } from './trailer.js';
+import { Gear } from './gear.js';
 import { Hanged, Archivist, Hollow, Wraith, retargetClips } from './ghost.js';
 import { Bats, Posters, Radar } from './extras.js';
 
@@ -78,17 +79,21 @@ const assets = {};
 async function load() {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const files = [['lib', 'library.glb', 0.5], ['arch', 'archivist.glb', 0.12], ['hol', 'hollow.glb', 0.16], ['crawl', 'crawler.glb', 0.04], ['man', 'human_m.glb', 0.03], ['woman', 'human_f.glb', 0.03],
-    ['aIdle', 'anim/m_idle.glb', 0.02], ['aWalk', 'anim/m_walk.glb', 0.02], ['aRun', 'anim/m_run.glb', 0.02], ['aCrouch', 'anim/m_crouch.glb', 0.02], ['fIdle', 'anim/f_idle.glb', 0.04]];
+    ['aIdle', 'anim/m_idle.glb', 0.02], ['aWalk', 'anim/m_walk.glb', 0.02], ['aRun', 'anim/m_run.glb', 0.02], ['aCrouch', 'anim/m_crouch.glb', 0.02], ['fIdle', 'anim/f_idle.glb', 0.02]];
   const prog = files.map(() => 0);
   const upd = () => { ui.loadFill.style.width = Math.round(prog.reduce((a, p, i) => a + p * files[i][2], 0) * 100) + '%'; };
   const get = (url, i) => loader.loadAsync(url, (e) => { prog[i] = e.total ? e.loaded / e.total : Math.min(0.95, e.loaded / 6e6); upd(); }).then((g) => { prog[i] = 1; upd(); return g; });
+  ui.loadText.textContent = 'Lighting the candles… tuning the radio…';
+  const samples = audio.loadSamples().catch(() => {});
   const [level, ...glbs] = await Promise.all([fetch('/assets/level.json').then((r) => r.json()), ...files.map((f, i) => get('/assets/' + f[1], i))]);
   assets.level = level; files.forEach((f, i) => { assets[f[0]] = glbs[i]; });
+  await samples;
   ui.loading.classList.add('hidden'); ui.start.classList.remove('hidden');
 }
 load().catch((e) => { console.error(e); ui.loadText.textContent = 'Could not load the library — ' + e.message; });
 
 // ---------------------------------------------------------------------------- game state
+let child, shadow, gear;
 let world, nav, player, archivist, crawler, wraith, nun, skeleton, hanged, ghosts = [], hollow, level, bats, posters, radar, hemi;
 let state = 'menu';            // menu | playing | paused | dying | dead | won
 let noLock = false, dragging = false;
@@ -118,26 +123,34 @@ function build() {
   crawler = new Archivist(scene, assets.crawl, [], nav, audio, { kind: 'crawler', speed: 1.1, sight: 0.6, hear: 1.9, reach: 1.15 });
   wraith = new Wraith(scene, audio);
   // the weeping sister glides (idle only: her skirt hides the legs); the bone man walks on the mannequin's clips
-  nun = new Archivist(scene, assets.woman, [named(assets.fIdle, 'idle')], nav, audio, { kind: 'nun', speed: 0.82, sight: 0.6, hear: 0.75, reach: 1.0, linger: 3 });
+  assets.woman.userData.idle = named(assets.fIdle, 'idle');
+  const childRig = cloneRig(assets.woman.scene);   // cloned before the Sister's habit is built onto the original
+  nun = new Archivist(scene, assets.woman, [assets.woman.userData.idle], nav, audio, { kind: 'nun', speed: 0.82, sight: 0.6, hear: 0.75, reach: 1.0, linger: 3 });
   skeleton = new Archivist(scene, { scene: cloneRig(assets.hol.scene) }, clips, nav, audio, { kind: 'skeleton', speed: 0.93, sight: 0.85, hear: 1.1, reach: 1.05 });
   hanged = new Hanged(scene, cloneRig(assets.hol.scene), assets.hol.animations);
-  ghosts = [archivist, crawler, wraith, nun, skeleton];
+  // the lost child (a second, smaller spirit) and the shadow (a silhouette that only moves when unobserved)
+  child = new Archivist(scene, { scene: childRig }, [assets.woman.userData.idle], nav, audio, { kind: 'child', speed: 1.0, sight: 0.7, hear: 1.2, reach: 0.9, linger: 2 });
+  shadow = new Archivist(scene, { scene: cloneRig(assets.hol.scene) }, clips, nav, audio, { kind: 'shadow', speed: 1, sight: 1, hear: 0, reach: 0.95 });
+  gear = new Gear(camera);
+  ghosts = [archivist, crawler, wraith, nun, skeleton, child, shadow];
   hollow = new Hollow(scene, assets.hol.scene, assets.hol.animations);
   player.setBody(assets.man, [named(assets.aIdle, 'Idle'), named(assets.aWalk, 'Walk'), named(assets.aRun, 'Run'), named(assets.aCrouch, 'Crouch')]);
   bats = new Bats(scene, 40); posters = new Posters(scene, renderer); radar = new Radar(ui.radar, ui.radarText);
   scene.traverse((o) => { if (o.isHemisphereLight) hemi = o; });
-  const alertLine = { archivist: 'RUN.', crawler: 'IT IS UNDER THE TABLES. RUN.', wraith: 'ABOVE YOU. KILL THE LIGHT.', nun: 'SHE HAS STOPPED CRYING. RUN.', skeleton: 'THE BONES ARE COMING. RUN.' };
+  const alertLine = { archivist: 'RUN.', crawler: 'IT IS UNDER THE TABLES. RUN.', wraith: 'ABOVE YOU. KILL THE LIGHT.', nun: 'SHE HAS STOPPED CRYING. RUN.', skeleton: 'THE BONES ARE COMING. RUN.', child: 'SHE WANTS TO PLAY. RUN.', shadow: 'DO NOT LOOK AWAY.' };
   for (const g of ghosts) {
     g.canHunt = (me) => G.huntCool <= 0 && !ghosts.some((o) => o !== me && o.hunting);   // only one of them hunts at a time
-    g.onAlert = (me) => { say(alertLine[me.kind], 1.8); player.shake = Math.max(player.shake, 0.5); const pan = panTo(me.pos.x, me.pos.z); if (me.kind === 'crawler') audio.growl(1, pan); else if (me.kind === 'nun') audio.shriek(0.9, pan); else if (me.kind === 'skeleton') { for (let i = 0; i < 6; i++) setTimeout(() => audio.rattle(1, pan), i * 90); audio.moan(1, pan); } };
-    g.onGiveUp = () => { G.huntCool = 9 + Math.random() * 6; if (state === 'playing') say('It has lost interest… for now.', 3); };
-    g.onDazed = (me) => { G.huntCool = 12; G.stares++; say('It cannot look away. Go — quietly.', 3.5); audio.whisper(panTo(me.pos.x, me.pos.z), 1); };
+    g.onAlert = (me) => { say(alertLine[me.kind], 1.8); player.shake = Math.max(player.shake, 0.5); const pan = panTo(me.pos.x, me.pos.z); if (me.kind === 'crawler') audio.growl(1, pan); else if (me.kind === 'nun') audio.shriek(0.9, pan); else if (me.kind === 'child') { audio.giggle(1.4, pan); audio.smp('children-laughing-3', { vol: 0.9, pan }); } else if (me.kind === 'skeleton') { for (let i = 0; i < 6; i++) setTimeout(() => audio.rattle(1, pan), i * 90); audio.moan(1, pan); } };
+    g.onSuspect = (me) => { if (state === 'playing' && !anyHunting()) { say('Something has turned towards you. Break its line of sight.', 3); audio.whisper(panTo(me.pos.x, me.pos.z), 0.9); G.fear = Math.max(G.fear, 0.6); } };
+    g.onHeardInside = () => { say('IT HEARD YOU IN THERE.', 2.5); };
+    g.onGiveUp = () => { G.huntCool = 32 + Math.random() * 16; if (state === 'playing') say('It has lost interest… for now.', 3); };
+    g.onDazed = (me) => { G.huntCool = 36; G.stares++; say('It cannot look away. Go — quietly.', 3.5); audio.whisper(panTo(me.pos.x, me.pos.z), 1); };
   }
   archivist.onStare = () => { audio.knock(0); setTimeout(() => audio.whisper(0, 0.9), 900); };
 }
 
 function newRun() {
-  world.reset(); for (const g of ghosts) g.reset(); hollow.hide(); hanged.hide(); posters.reset();
+  world.reset(); for (const g of ghosts) g.reset(); hollow.hide(); hanged.hide(); posters.reset(); if (G) for (const b of G.books) scene.remove(b.m);
   crawler.inner.rotation.x = Math.PI / 2; crawler.inner.position.set(0, 0.3, -0.8);
   player.reset({ x: level.playerSpawn[0], z: level.playerSpawn[2] });
   player.sens = +ui.sens.value;
@@ -147,9 +160,10 @@ function newRun() {
   nun.spawn({ x: level.ghostSpawn[0], z: level.ghostSpawn[2] });
   skeleton.spawn(nav.randomPoint(sp, 20, 34));
   G = {
+    emfOn: false, emfLv: 0, emfSpike: 0, emfT: 0, emfJit: 0, voiceCool: 0, replyCool: 0, talkT: 0, quietT: 0, radioWord: '', radioWordT: 0, bookT: 0, books: [],
     cryT: 5, introT: 7, time: 0, hints, noteRead: false, noteOpen: false, awake: false, awakeT: -1, exit: 'locked', exitT: 0, fear: 0, hurt: 0,
     scareT: 14 + Math.random() * 14, lastScare: '', ev: null, dieT: 0, hides: 0, scares: 0, target: null, msgT: 0, peekT: 0, batteriesWarned: false,
-    huntCool: 28, awakeAt: 0, stares: 0, nerveBroken: false, staring: false, flashT: 0, flashDur: 1, stormT: 14 + Math.random() * 12, pingT: 0, radioT: 12, killer: null, staredHint: false, tipT: 9,
+    huntCool: 50, awakeAt: 0, stares: 0, nerveBroken: false, staring: false, flashT: 0, flashDur: 1, stormT: 14 + Math.random() * 12, pingT: 0, radioT: 12, killer: null, staredHint: false, tipT: 9,
   };
   ui.noteText.innerHTML = '<p><i>The doors are sealed with three locks. I have hidden the keys where no reader would think to look:</i></p><ul>' +
     hints.map((h) => `<li>One lies ${h}.</li>`).join('') + '</ul><p><i>Should you take one, I will know. Put out your light when you hear me. Stand inside the cabinets and do not breathe.</i></p>';
@@ -210,7 +224,7 @@ async function startTrailer(withRecording) {
   trailer.start(async () => { state = 'menu'; ui.menu.classList.remove('hidden'); audio.update(0.016, { ghostDist: 99, ghostActive: false, chase: false, ghostPan: 0, fear: 0, ambient: false, tension: 0, staticLevel: 0, winded: 0 }); await finish?.(); });
 }
 function updateTrailer(dt) {
-  G.time += dt;
+  G.time += dt; gear.emf.visible = gear.radio.visible = false;
   trailer.update(dt);
   if (state !== 'trailer') return;
   updateStorm(dt);
@@ -247,6 +261,9 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'KeyE') interact();
   else if (e.code === 'KeyV') say(player.toggleView() === 'third' ? 'Third-person view' : 'First-person view', 1.6);
   else if (e.code === 'KeyR') toggleRadio();
+  else if (e.code === 'KeyT') { G.emfOn = !G.emfOn; audio.click(); if (G.emfOn && !G.emfTold) { G.emfTold = true; say('EMF meter. One light is nothing. Five lights: it is standing next to you.', 5); } }
+  else if (e.code === 'KeyM') toggleMic();
+  else if (e.code === 'KeyG') throwBook();
   else if (e.code === 'KeyQ') { radar.on = !radar.on; ui.radarBox.classList.toggle('off', !radar.on); audio.click(); }
   else if (e.code === 'Escape' || e.code === 'KeyP') pause();
 });
@@ -277,6 +294,7 @@ function findTarget() {
     const s = dot - d * 0.05; if (!best || s > bs) { best = t; bs = s; }
   };
   for (const it of world.items) consider(it.pos, 2.3, 0.93, { type: it.type, it, label: it.type === 'key' ? 'E — take the key' : 'E — take the battery' });
+  for (const c of world.candles) if (c.kind !== 'chandelier' && c.pos.y < 2.3) consider(c.pos, 2.1, 0.95, { type: 'candle', c, label: c.lit ? 'E — pinch out the candle' : 'E — light the candle' });
   const n = level.noteSpots[0]; consider(_c.set(...n.pos), 2.4, 0.88, { type: 'note', label: 'E — read the ledger' });
   for (const h of world.hides) { _c.copy(h.pos).setY(1.3); if (Math.hypot(h.front.x - player.pos.x, h.front.z - player.pos.z) < 1.7) consider(_c, 3, 0.8, { type: 'hide', h, label: 'E — hide in the cabinet' }); }
   if (G.exit !== 'open') consider(_c.set(level.exit.door[0], 1.4, level.exit.door[2]), 2.9, 0.8, { type: 'exit', label: player.keysHeld >= 3 ? 'E — unlock the doors' : `E — the doors  (${player.keysHeld} / 3 keys)` });
@@ -297,6 +315,11 @@ function interact() {
       else if (player.keysHeld < 3) { say(`${3 - player.keysHeld} more.`, 2.5); for (const g of ghosts) if (g.active) g.investigate(player.pos.x, player.pos.z, true); G.scareT = Math.min(G.scareT, 6); }
       if (player.keysHeld >= 3) { say('All three. The doors — south end of the hall.', 4.5); objective('Unlock the <b>great doors</b> and escape'); for (const g of ghosts) if (g.active) g.investigate(player.pos.x, player.pos.z, true); }
       else objective(`Find the hidden <b>keys</b> — ${player.keysHeld} of 3`);
+      break;
+    }
+    case 'candle': {        // light is safety from the Shadow and a beacon for the Wraith
+      world.setLit(t.c, !t.c.lit); if (t.c.lit) { audio.click(); audio.whoosh(0); } else audio.blowOut();
+      if (!G.candleTold) { G.candleTold = true; say('Candles can be lit and put out. The dark hides you. It hides them too.', 4.5); }
       break;
     }
     case 'battery': world.removeItem(t.it); player.battery = Math.min(100, player.battery + 55); audio.battery(); say('Batteries.', 1.6); break;
@@ -325,6 +348,91 @@ function interact() {
       break;
     default: break;
   }
+}
+
+// ---------------------------------------------------------------------------- microphone: the house can hear the player
+const mic = { on: false, level: 0, floor: 0.01, an: null, data: null, stream: null, node: null };
+async function toggleMic() {
+  if (mic.on) { mic.on = false; mic.stream?.getTracks().forEach((t) => t.stop()); try { mic.node?.disconnect(); } catch { /* */ } mic.level = 0; player.voice = 0; $('micBox').classList.remove('on'); say('Microphone off.', 2); return; }
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported');
+    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
+    mic.node = audio.ctx.createMediaStreamSource(mic.stream); mic.an = audio.ctx.createAnalyser(); mic.an.fftSize = 1024; mic.data = new Float32Array(1024);
+    mic.node.connect(mic.an);          // analysed only — never played back
+    mic.on = true; mic.floor = 0.02; $('micBox').classList.add('on');
+    say('Microphone on. They can hear you now. Whisper — or ask the radio a question.', 5.5);
+  } catch { say('The microphone is not available (permission denied or no device).', 4); }
+}
+function updateMic(dt) {
+  if (!mic.on) { player.voice = 0; return; }
+  mic.an.getFloatTimeDomainData(mic.data); let e = 0; for (let i = 0; i < mic.data.length; i++) e += mic.data[i] * mic.data[i];
+  const rms = Math.sqrt(e / mic.data.length);
+  mic.floor += (rms - mic.floor) * (rms < mic.floor ? 0.2 : 0.002);          // follows the room's own hiss, slowly
+  const lv = Math.max(0, Math.min(1, (rms - mic.floor * 1.8 - 0.012) / 0.16));
+  mic.level += (lv - mic.level) * Math.min(1, dt * (lv > mic.level ? 18 : 5));
+  $('micFill').style.width = (mic.level * 100).toFixed(0) + '%';
+  const L = mic.level;
+  player.voice = L > 0.1 ? 3 + L * 17 : 0;                                    // how far (m) your real voice carries
+  G.voiceCool -= dt; G.replyCool -= dt;
+  if (L > 0.1) { G.talkT += dt; G.quietT = 0; G.emfSpike = Math.max(G.emfSpike, 0.4); } else G.quietT += dt;
+  if (L > 0.55 && G.voiceCool <= 0) {                                         // a shout
+    G.voiceCool = 9; say(player.hidden ? 'Be quiet. BE QUIET.' : 'They heard that.', 2.5); G.fear = Math.max(G.fear, 0.7); G.emfSpike = 1.5;
+    const near = ghosts.filter((g) => g.active && !g.hunting && g.kind !== 'wraith' && g.kind !== 'shadow').sort((a, b) => a.pos.distanceTo(player.pos) - b.pos.distanceTo(player.pos))[0];
+    if (near) near.investigate(player.pos.x, player.pos.z, true);
+  }
+  if (G.quietT > 0.7 && G.talkT > 0.45) {                                     // you said something and stopped: something answers
+    const spoke = G.talkT; G.talkT = 0;
+    if (player.radio && G.replyCool <= 0) {
+      G.replyCool = 5 + Math.random() * 3;
+      const near = ghosts.filter((g) => g.active).sort((a, b) => a.pos.distanceTo(player.pos) - b.pos.distanceTo(player.pos))[0];
+      const d = near ? near.pos.distanceTo(player.pos) : 99;
+      const pool = d < 7 ? [['BEHIND YOU', null], ['I SEE YOU', 'i-see-you-2'], ['HERE', null], ['GET OUT', 'get-out-2-2']] : spoke > 2.2 ? [['GET OUT', 'get-out-2-2'], ['COMING', 'i-m-coming-to-get-you'], ['LEAVE', null], ['WHY', null]] : [['YES', null], ['NO', null], ['COLD', null], ['CLOSE', null], ['I SEE YOU', 'i-see-you-2'], ['HUSH', null]];
+      const [word, smp] = pool[(Math.random() * pool.length) | 0];
+      setTimeout(() => { if (state !== 'playing' || !player.radio) return; G.radioWord = word; G.radioWordT = 2.6; ui.radioMsg.textContent = `…kssh… ${word}…`; G.emfSpike = 1.6; if (!(smp && audio.radioSay(smp))) { audio.radioVoice(); speak(word.toLowerCase()); } G.fear = Math.max(G.fear, 0.65); }, 500 + Math.random() * 700);
+    } else if (!player.radio && Math.random() < 0.35 && G.replyCool <= 0) { G.replyCool = 8; setTimeout(() => state === 'playing' && audio.whisper(Math.random() * 2 - 1, 1), 600); }
+  }
+  if (G.quietT > 1.5) G.talkT = 0;
+}
+
+// ---------------------------------------------------------------------------- EMF meter and the things in the player's hands
+function updateGear(dt, nearDist) {
+  G.emfSpike = Math.max(0, G.emfSpike - dt); G.radioWordT -= dt; if (G.radioWordT <= 0) G.radioWord = '';
+  let lv = 0;
+  if (G.emfOn) {
+    let d = nearDist; if (G.ev && hollow.mode !== 'off') d = Math.min(d, hollow.pos.distanceTo(player.pos) * 0.8); if (hanged.active) d = Math.min(d, 2.5);
+    lv = d < 3.2 ? 5 : d < 6 ? 4 : d < 10 ? 3 : d < 15.5 ? 2 : 1;
+    G.emfJit -= dt; if (G.emfJit <= 0) { G.emfJit = 0.12 + Math.random() * 0.5; G.emfWob = Math.random() < 0.22 ? (Math.random() < 0.5 ? -1 : 1) : 0; }
+    lv = Math.max(1, Math.min(5, lv + (lv > 1 ? G.emfWob || 0 : 0)));
+    if (G.emfSpike > 0) lv = Math.max(lv, G.emfSpike > 1 ? 5 : 3);
+    G.emfT -= dt; if (G.emfT <= 0) { G.emfT = [9, 9, 0.5, 0.3, 0.17, 0.09][lv]; audio.emf(lv); }
+    if (lv >= 4 && !G.emfWarned) { G.emfWarned = true; say('The meter is screaming. It is very close.', 3); }
+  }
+  G.emfLv = lv;
+  gear.update(dt, { visible: player.camDist < 0.3 && player.mode === 'free' && !G.noteOpen, emfOn: G.emfOn, radioOn: player.radio, level: lv, staticLevel: Math.max(0, 1 - nearDist / 14), speed: Math.hypot(player.vel.x, player.vel.z), word: G.radioWord, light: player.torchState.power });
+}
+
+// ---------------------------------------------------------------------------- throwing a book: a noise somewhere that is not you
+const bookGeo = new THREE.BoxGeometry(0.16, 0.045, 0.22), bookMat = new THREE.MeshStandardMaterial({ color: 0x4a1f17, roughness: 0.8 });
+function throwBook() {
+  if (player.mode !== 'free' || G.bookT > 0) { if (G.bookT > 0) say('You need a moment to find another book.', 1.6); return; }
+  G.bookT = 7; camera.getWorldDirection(_a);
+  const m = new THREE.Mesh(bookGeo, bookMat); m.castShadow = true; m.position.copy(camera.position).addScaledVector(_a, 0.4); m.position.y -= 0.15; scene.add(m);
+  G.books.push({ m, v: new THREE.Vector3(_a.x * 9.5, _a.y * 9.5 + 2.6, _a.z * 9.5), live: true, t: 0 }); audio.whoosh(0);
+  if (!G.bookTold) { G.bookTold = true; say('A thrown book makes a noise somewhere else. They will go and look.', 4.5); }
+}
+function updateBooks(dt) {
+  G.bookT = Math.max(0, G.bookT - dt);
+  for (const b of G.books) {
+    b.t += dt; if (!b.live) { if (b.t > 40) { scene.remove(b.m); b.dead = true; } continue; }
+    b.v.y -= 16 * dt; b.m.position.addScaledVector(b.v, dt); b.m.rotation.x += dt * 9; b.m.rotation.z += dt * 6;
+    const p = b.m.position, wall = !nav.free(p.x, p.z) && p.y < 2.4;
+    if (p.y <= 0.03 || wall || b.t > 4) {
+      if (wall) p.addScaledVector(b.v, -dt); p.y = Math.max(0.03, wall ? p.y : 0.03); b.live = false; b.t = 0; b.m.rotation.set(0, Math.random() * 6, wall ? 0.4 : 0);
+      audio.slam(panTo(p.x, p.z), Math.max(0.3, 1 - p.distanceTo(player.pos) / 22));
+      for (const g of ghosts) if (g.active && !g.hunting && g.kind !== 'wraith' && g.kind !== 'shadow' && g.state !== 'dazed' && g.pos.distanceTo(p) < 17) g.investigate(p.x, p.z, false);
+    }
+  }
+  G.books = G.books.filter((b) => !b.dead);
 }
 
 // ---------------------------------------------------------------------------- storm, radio, staring
@@ -366,7 +474,7 @@ function updateRadio(dt) {
   if (near) {
     const d = near.pos.distanceTo(player.pos), side = panTo(near.pos.x, near.pos.z);
     const where = d < 6 ? 'right beside you' : side < -0.4 ? 'to your left' : side > 0.4 ? 'to your right' : 'close';
-    opts.push([`…${near.kind === 'wraith' ? 'above' : near.kind === 'crawler' ? 'on the floor' : near.kind === 'nun' ? 'weeping' : near.kind === 'skeleton' ? 'bones' : 'walking'}… ${where}… ${d.toFixed(0)} metres…`, where], ['…look it in the eyes… it cannot bear to be seen…', 'look it in the eyes'], ['…we were readers too… kssh… do not run…', 'we were readers too']);
+    opts.push([`…${near.kind === 'wraith' ? 'above' : near.kind === 'crawler' ? 'on the floor' : near.kind === 'nun' ? 'weeping' : near.kind === 'skeleton' ? 'bones' : near.kind === 'child' ? 'small. laughing' : near.kind === 'shadow' ? 'do not look away' : 'walking'}… ${where}… ${d.toFixed(0)} metres…`, where], ['…look it in the eyes… it cannot bear to be seen…', 'look it in the eyes'], ['…we were readers too… kssh… do not run…', 'we were readers too']);
   } else opts.push(['…is someone there?… kssh… put the key back…', 'is someone there'], ['…he is still reading… do not wake him…', 'do not wake him']);
   const [txt, voice] = opts[(Math.random() * opts.length) | 0];
   ui.radioMsg.textContent = txt; audio.radioVoice(); speak(voice);
@@ -403,9 +511,9 @@ function lookingAt(p, cone) { camera.getWorldDirection(_a); _b.copy(p).sub(camer
 function tier() { return Math.min(3, player.keysHeld + Math.floor(G.time / 110)); }
 const POOLS = [
   ['slam', 'bats', 'lightning', 'watcher', 'poster', 'shriek', 'sob', 'giggle', 'hanged', 'aisle', 'shout'],
-  ['slam', 'bats', 'silhouette', 'watcher', 'poster', 'aisle', 'dash', 'blowout', 'shriek', 'hanged', 'giggle', 'sob', 'shout'],
-  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'radar', 'aisle', 'shriek', 'hanged', 'sob', 'face'],
-  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'behind', 'radar', 'face', 'shriek', 'hanged', 'giggle'],
+  ['slam', 'bats', 'silhouette', 'watcher', 'poster', 'aisle', 'dash', 'blowout', 'shriek', 'hanged', 'giggle', 'sob', 'shout', 'lunge'],
+  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'radar', 'aisle', 'shriek', 'hanged', 'sob', 'face', 'lunge'],
+  ['bats', 'silhouette', 'poster', 'aisle', 'dash', 'blowout', 'behind', 'behind', 'radar', 'face', 'shriek', 'hanged', 'giggle', 'lunge', 'lunge'],
 ];
 
 function startScare(force) {
@@ -483,7 +591,7 @@ function startScare(force) {
       for (const d of [2.4, 1.9, 3.0]) { const x = p.x + fx * d, z = p.z + fz * d; if (nav.free(x, z) && nav.walkLos(p.x, p.z, x, z)) { q = { x, z }; break; } }
       if (!q) return false;
       hanged.drop(q.x, q.z, Math.atan2(p.x - q.x, p.z - q.z));
-      audio.rope(1); audio.sting(0.8); setTimeout(() => state === 'playing' && audio.moan(0.9, 0), 500);
+      audio.rope(1); audio.sting(0.8); setTimeout(() => { if (state === 'playing') { audio.moan(0.9, 0); audio.gasp(0.8); } }, 500); G.emfSpike = 2;
       player.shake = Math.max(player.shake, 0.75); G.fear = 1; G.scares++; flash(0.3, 180);
       return true;
     }
@@ -506,6 +614,12 @@ function startScare(force) {
       const pan = Math.random() * 2 - 1;
       audio.shout(1, pan); G.fear = Math.max(G.fear, 0.5);
       for (const g of [nun, skeleton, archivist]) if (g.active && !g.hunting && Math.random() < 0.3) g.investigate(p.x + pan * 8, p.z);
+      return true;
+    }
+    case 'lunge': {        // it is suddenly IN your face, screaming — and then it is gone
+      ui.scare.classList.remove('peek'); ui.scare.classList.add('on'); audio.sting(1); audio.shriek(1, 0); flash(0.6, 200);
+      player.shake = Math.max(player.shake, 0.9); G.fear = 1; G.hurt = 0.5; G.scares++; G.emfSpike = 2;
+      setTimeout(() => { if (state === 'playing') { ui.scare.classList.remove('on'); audio.gasp(0.9); } }, 620);
       return true;
     }
     case 'face': {         // a face, for a single frame
@@ -595,7 +709,7 @@ function die(killer = archivist) {
   if (killer.kind === 'wraith') { killer.pos.y = player.eye - 1.66; killer.vel.set(0, 0, 0); }
   else if (killer.kind === 'crawler') { killer.inner.rotation.x = 0.35; killer.inner.position.set(0, 0.25, -0.15); }   // it rears up off the floor
   else killer.play('headShake', 0.05, 2.4);
-  hanged.hide();
+  hanged.hide(); gear.update(0.5, { visible: false, emfOn: false, radioOn: false, level: 0, staticLevel: 0, speed: 0, word: '' }); gear.update(0.5, { visible: false, emfOn: false, radioOn: false, level: 0, staticLevel: 0, speed: 0, word: '' });
   killer.setOpacity(1); killer.light.intensity = 5;
   player.lookLock = new THREE.Vector3(); player.shake = 1.2; player.fovKick = -16; player.mode = player.mode === 'free' ? 'caught' : player.mode;
   ui.hideMask.classList.remove('on'); ui.hideHint.classList.add('hidden'); ui.prompt.classList.remove('show'); ui.nerve.classList.remove('show');
@@ -617,6 +731,8 @@ function updateDying(dt) {
     const lines = {
       archivist: ['The Archivist adds another volume to his collection.', 'You are catalogued. You are shelved. You are quiet now.', 'Overdue. Forever.', 'He closes the book. You are inside it.'],
       crawler: ['It drags you under the tables. There is room for one more.', 'You never heard it until its fingers closed around your ankle.'],
+      child: ['She only wanted someone to play with. Now she has you, for ever.', 'Ring a ring o\' roses. You all fall down.'],
+      shadow: ['You looked away.', 'It was never across the room. It was waiting for you to blink.'],
       nun: ['She was not weeping for herself. She was weeping for you.', 'Sister Agnes folds your hands for you. She has had practice.', 'You hear her crying again. From inside your own chest.'],
       skeleton: ['He only wanted his skin back. Yours fits well enough.', 'The bones are quiet now. There are more of them than before.'],
       wraith: ['The light went out. Then it was wearing your face.', 'You should not have looked up.'],
@@ -654,6 +770,7 @@ function updatePlaying(dt) {
   G.cryT -= dt;
   if (G.cryT <= 0 && nun.active) {
     G.cryT = 5 + Math.random() * 7;
+    if (child.active && !child.hunting && Math.random() < 0.45) { const d = child.pos.distanceTo(player.pos), v = Math.max(0, 1 - d / 22), pan = panTo(child.pos.x, child.pos.z); if (Math.random() < 0.3) audio.hymn(v * 1.2, pan); else audio.giggle(v * 1.3 + 0.03, pan); }
     if (!nun.hunting && nun.state !== 'dazed') { const d = nun.pos.distanceTo(player.pos), v = Math.max(0, 1 - d / 26), pan = panTo(nun.pos.x, nun.pos.z); if (Math.random() < 0.2) audio.hymn(v * 1.4, pan); else audio.cry(v * v * 1.6 + 0.04, pan); }
   }
   hanged.update(dt, G.time);
@@ -663,6 +780,14 @@ function updatePlaying(dt) {
     if (!wraith.active && (player.keysHeld >= 2 || el > 110)) {
       wraith.spawn({ x: (Math.random() - 0.5) * 10, z: player.pos.z > 0 ? -14 : 14 }); lightning(1, 0.3); audio.wail(0.9, 0);
       say('Something is circling above the shelves. It follows the light.', 5.5);
+    }
+    if (!child.active && ((player.keysHeld >= 1 && el > 45) || player.keysHeld >= 2 || el > 150)) {
+      child.spawn(nav.randomPoint(player.pos, 16, 28)); audio.giggle(1, 0);
+      say('A child is laughing somewhere among the shelves. There are no children here.', 5.5);
+    }
+    if (!shadow.active && (player.keysHeld >= 3 || el > 280)) {
+      shadow.spawn(nav.randomPoint(player.pos, 14, 24)); shadow.cool = 6;
+      say('A shadow is standing where there was none. It only moves when you look away.', 6.5);
     }
     if (!crawler.active && (player.keysHeld >= 3 || el > 220)) {
       crawler.spawn(nav.randomPoint(player.pos, 13, 24)); crawler.anger = player.keysHeld; audio.growl(0.8, 0);
@@ -675,7 +800,7 @@ function updatePlaying(dt) {
     if (G.exitT > 1.7) { G.exit = 'open'; world.exitTarget = 1.75; world.exitCollider.on = false; audio.creak(2.6, 0, 1); audio.slam(0, 0.5); say('RUN.', 2.5); objective('<b>Get out.</b>'); lightning(1, 0.2); G.huntCool = 0; archivist.cool = 0; if (!anyHunting()) archivist.startChase(player); }
   }
   if (G.exit === 'open' && player.pos.z > level.exit.win[2]) { win(); return; }
-  if (G.tipT > 0) { G.tipT -= dt; if (G.tipT <= 0) say('Q — ghost radar   ·   R — radio   ·   V — change view', 6); }
+  if (G.tipT > 0) { G.tipT -= dt; if (G.tipT <= 0) say('T — EMF meter  ·  R — radio  ·  Q — radar  ·  M — microphone  ·  G — throw a book', 7); }
 
   // nearest threat
   let near = null, ad = 99;
@@ -693,7 +818,8 @@ function updatePlaying(dt) {
   if (!G.noteOpen) player.update(dt, G.fear); else { const k = player.keys; player.keys = {}; player.update(dt, G.fear); player.keys = k; }
   if (player.radio && player.mode === 'free') player.noise = Math.max(player.noise, 7);
   camera.updateMatrixWorld();
-  updateStare(dt);
+  updateStare(dt); updateMic(dt); updateBooks(dt);
+  if (shadow.active) { shadow.headPos(_b); _c.copy(_b).sub(camera.position); const sd = _c.length(); camera.getWorldDirection(_a); shadow.watched = sd < 26 && _c.dot(_a) / sd > 0.78 && nav.los(player.pos.x, player.pos.z, shadow.pos.x, shadow.pos.z) && (player.lightOn || sd < 5); }
   for (const g of ghosts) { if (g.update(dt, player, world, G.time) === 'caught') { die(g); return; } }
   updateHaunting(dt);
   updateStorm(dt); updateRadio(dt);
@@ -706,6 +832,7 @@ function updatePlaying(dt) {
     if (G.peekT <= 0) { ui.scare.classList.add('peek'); audio.sting(0.45); player.shake = Math.max(player.shake, 0.5); G.fear = 1; G.scares++; setTimeout(() => ui.scare.classList.remove('peek'), 170); }
   }
 
+  updateGear(dt, near ? ad : 99);
   const prox = near ? Math.max(0, 1 - ad / 14) : 0;
   audio.update(dt, { ghostDist: ad, ghostActive: !!near, chase: hunting, ghostPan: near ? panTo(near.pos.x, near.pos.z) : 0, fear: G.fear, ambient: !hunting,
     tension: Math.max(G.fear, tier() * 0.14), staticLevel: prox, winded: player.exhausted ? 0.9 : player.stamina < 0.4 ? 0.6 : 0 });
@@ -748,4 +875,4 @@ function frame() {
 }
 frame();
 
-if (import.meta.env.DEV) window.__ha = { startTrailer, updateTrailer, get trailer() { return trailer; }, get s() { return { state, G, world, nav, player, archivist, crawler, wraith, nun, skeleton, hanged, ghosts, hollow, level, camera, renderer, bats, posters, radar }; }, die, interact, startScare, updatePlaying, updateDying, findTarget, lightning, toggleRadio };
+if (import.meta.env.DEV) window.__ha = { startTrailer, updateTrailer, get trailer() { return trailer; }, get s() { return { state, G, world, nav, player, archivist, crawler, wraith, nun, skeleton, child, shadow, gear, mic, hanged, ghosts, hollow, level, camera, renderer, bats, posters, radar }; }, die, interact, startScare, updatePlaying, updateDying, findTarget, lightning, toggleRadio };

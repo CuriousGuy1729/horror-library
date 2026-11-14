@@ -219,6 +219,8 @@ export class Archivist extends Figure {
     this.linger = opts.linger || 1;
     if (this.kind === 'crawler') this.#buildCrawler();
     else if (this.kind === 'nun') this.#buildNun();
+    else if (this.kind === 'child') this.#buildChild();
+    else if (this.kind === 'shadow') this.#buildShadow();
     else if (this.kind === 'skeleton') { const sk = buildSkeleton(this.root); this.mats.push(...sk.mats); this.head = sk.head; this.skull = sk.skull; }
     else {
       this.root.scale.setScalar(1.09);
@@ -236,10 +238,39 @@ export class Archivist extends Figure {
       });
       this.head = this.root.getObjectByName('Head');
     }
-    this.light = new THREE.PointLight({ crawler: 0xb04038, skeleton: 0xd09a5a, nun: 0xa9a2c8 }[this.kind] || 0x86b6dc, 0, 7, 1.8); this.light.position.set(0, this.kind === 'crawler' ? 0.6 : 1.4, 0.3); this.root.add(this.light);
+    this.light = new THREE.PointLight({ crawler: 0xb04038, skeleton: 0xd09a5a, nun: 0xa9a2c8, child: 0x9fc4e8, shadow: 0x200000 }[this.kind] || 0x86b6dc, 0, 7, 1.8); this.light.position.set(0, this.kind === 'crawler' ? 0.6 : 1.4, 0.3); if (this.kind === 'child') this.light.position.y = 1.9; this.root.add(this.light);
     scene.add(this.root);
     this.path = []; this.lastKnown = new THREE.Vector3();
     this.reset();
+  }
+
+  // ---- the lost child: a small pale figure that drifts between the shelves, laughing
+  #buildChild() {
+    const root = this.root; root.updateMatrixWorld(true);
+    const B = (n) => root.getObjectByName(n), wp = (o) => o.getWorldPosition(new THREE.Vector3());
+    const head = this.head = B('Head'), eL = B('LeftEye'), eR = B('RightEye');
+    const face = eL && eR ? { l: wp(eL), r: wp(eR) } : null;
+    if (face) { face.l.z += 0.012; face.r.z += 0.012; }
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      let bind = o.bindMatrix;
+      if (o.skeleton) { const i = o.skeleton.bones.indexOf(head); if (i >= 0) bind = new THREE.Matrix4().multiplyMatrices(head.matrixWorld, o.skeleton.boneInverses[i]).multiply(o.bindMatrix); }
+      const m = spectral(o.material, { glow: 0.5, rim: 0.9, sat: 0.0, tint: [0.42, 0.5, 0.6], opacity: 0.8, face, bind });
+      m.userData.baseOpacity = 0.8; o.material = m; this.mats.push(m); o.castShadow = false; o.frustumCulled = false;
+    });
+    root.scale.set(0.6, 0.64, 0.6);
+  }
+
+  // ---- the shadow: a man-shaped hole in the dark with two red points for eyes
+  #buildShadow() {
+    const root = this.root; root.updateMatrixWorld(true);
+    const black = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, fog: false }); black.userData.baseOpacity = 0.96; this.mats.push(black);
+    root.traverse((o) => { if (o.isMesh) { o.material = black; o.castShadow = false; } });
+    const head = this.head = root.getObjectByName('mixamorigHead');
+    const eyeMat = this.eyeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff2a14).multiplyScalar(3), fog: false, transparent: true }); eyeMat.userData.baseOpacity = 1;
+    const h = restHolder(head);
+    for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), eyeMat); e.position.set(sx * 0.034, 0.085, 0.1); h.add(e); }
+    root.scale.setScalar(1.12);
   }
 
   // ---- the weeping sister: a woman in a habit; the skirt hides her legs so she glides
@@ -348,6 +379,31 @@ export class Archivist extends Figure {
     this.lastKnown.copy(pl.pos);
   }
   /** breaks off and wanders away; it will not hunt again for a while */
+  // ---- the shadow: it only moves while nobody is looking at it. Light and a steady gaze hold it still.
+  #shadow(dt, pl, time, dist) {
+    if (this.state === 'dazed') {            // stared down: it comes apart and re-forms somewhere far away
+      this.state = 'patrol'; this.daze = 0; this.cool = 30; this.fade = 0; this.path = [];
+      const q = this.nav.randomPoint(pl.pos, 16, 30); this.pos.x = q.x; this.pos.z = q.z; this.onGiveUp?.(this);
+    }
+    const frozen = this.watched && !pl.hidden;
+    this.still = frozen ? Math.min(1, (this.still || 0) + dt * 6) : Math.max(0, (this.still || 0) - dt * 2);
+    let speed = 0;
+    if (!frozen && !pl.hidden && this.cool <= 0) {
+      speed = 2.1 * this.spd;
+      this.repath -= dt; if (this.repath <= 0) { this.repath = 0.5; this.goTo(pl.pos.x, pl.pos.z); }
+      this.#follow(dt, speed);
+      if (dist < this.reach && !this.watched) return 'caught';
+    } else if (pl.hidden && this.path.length === 0 && Math.random() < dt * 0.3) { const p = this.nav.randomPoint(pl.pos, 8, 18); this.goTo(p.x, p.z); }
+    else if (pl.hidden) this.#follow(dt, 1.2);
+    if (frozen) this.face(pl.pos.x, pl.pos.z, dt, 1.5);
+    const moving = speed > 0 && this.path.length > 0;
+    this.play(moving ? 'walk' : 'idle', 0.2, moving ? 1.5 : 0.04);
+    this.setOpacity(this.fade); this.light.intensity = 0;
+    if (this.eyeMat) this.eyeMat.opacity = this.fade * (0.35 + 0.65 * this.still);
+    this.mixer.update(frozen ? 0 : dt);
+    return null;
+  }
+
   giveUp(pl, cool = 12) {
     this.state = 'patrol'; this.cool = cool; this.seen = 0; this.wait = 0; this.sawHide = false;
     const p = this.nav.randomPoint(pl.pos, 14, 30); this.goTo(p.x, p.z); this.onGiveUp?.(this);
@@ -379,27 +435,33 @@ export class Archivist extends Figure {
     // ---- senses
     this.cool = Math.max(0, this.cool - dt);
     // being stared down: holding its gaze slows it, then leaves it transfixed
-    if (this.stared && this.state !== 'dazed') this.daze = Math.min(1, this.daze + dt / 1.5); else this.daze = Math.max(0, this.daze - dt * 0.6);
+    if (this.stared && this.state !== 'dazed') this.daze = Math.min(1, this.daze + dt / (this.kind === 'shadow' ? 5 : 1.5)); else this.daze = Math.max(0, this.daze - dt * 0.6);
     if (this.daze >= 1 && this.state !== 'dazed') { this.state = 'dazed'; this.wait = 5.5; this.path = []; this.seen = 0; this.onDazed?.(this); }
-    const range = (pl.hidden ? 0 : pl.lightOn ? 17 : pl.crouch ? 4.5 : 8.5) * this.sight;
+    const range = (pl.hidden ? 0 : pl.lightOn ? 12.5 : pl.crouch ? 3.2 : 6.5) * this.sight;
     const fwd = (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / (dist || 1);
     const sees = this.sees = dist < range && (fwd > 0.15 || dist < 2.6) && this.nav.los(this.pos.x, this.pos.z, pl.pos.x, pl.pos.z);
-    if (sees) { this.seen += dt * (dist < 5 ? 3 : 1); this.lostT = 0; this.lastKnown.copy(pl.pos); } else { this.seen = Math.max(0, this.seen - dt * 0.4); this.lostT += dt; }
-    const hears = !pl.hidden && pl.noise * this.hear > dist;
+    if (sees) { this.seen += dt * (dist < 3.2 ? 2.4 : dist < 7 ? 0.8 : 0.45); this.lostT = 0; this.lastKnown.copy(pl.pos); } else { this.seen = Math.max(0, this.seen - dt * 0.7); this.lostT += dt; }
+    // it hears footsteps, the radio — and, if the microphone is on, the player's real voice (even inside a cabinet)
+    const hears = (!pl.hidden && pl.noise * this.hear > dist) || (pl.voice || 0) * this.hear > dist;
+    // a first glimpse only makes it curious: it turns and comes to look, and the player gets a warning
+    if (this.seen > 0.35 && !this.warned && this.state === 'patrol') { this.warned = true; this.onSuspect?.(this); }
+    if (this.seen <= 0.02) this.warned = false;
     let speed = 0;
     const boost = 1 + this.anger * 0.07;
+    if (this.kind === 'shadow') return this.#shadow(dt, pl, time, dist);
 
     switch (this.state) {
       case 'patrol': {
-        if (this.seen > 0.45) { this.startChase(pl); break; }
+        if (this.seen > 1.15) { this.startChase(pl); break; }
+        if (this.seen > 0.4) { this.face(pl.pos.x, pl.pos.z, dt, 2.5); break; }      // stops and stares before it commits
         if (hears) { this.investigate(pl.pos.x, pl.pos.z); break; }
-        if (this.wait > 0) { this.wait -= dt; if (this.wait <= 0) { const p = Math.random() < 0.7 ? this.nav.randomPoint(pl.pos, 6, 17) : this.nav.randomPoint(); this.goTo(p.x, p.z); } break; }
+        if (this.wait > 0) { this.wait -= dt; if (this.wait <= 0) { const p = Math.random() < 0.3 ? this.nav.randomPoint(pl.pos, 9, 20) : this.nav.randomPoint(); this.goTo(p.x, p.z); } break; }
         speed = 1.25 * boost * this.spd;
         if (this.#follow(dt, speed)) this.wait = (1 + Math.random() * 2.5) * this.linger;
         break;
       }
       case 'investigate': {
-        if (this.seen > 0.3) { this.startChase(pl); break; }
+        if (this.seen > 0.9) { this.startChase(pl); break; }
         if (hears && Math.random() < dt * 2) this.goTo(pl.pos.x, pl.pos.z);
         if (this.wait > 0) {
           this.wait -= dt;
@@ -422,6 +484,7 @@ export class Archivist extends Figure {
         if (h) this.face(h.pos.x, h.pos.z, dt, 3);
         this.wait -= dt;
         if (!pl.hidden && this.seen > 0.1) { this.startChase(pl); break; }
+        if (pl.hidden && (pl.voice || 0) > 5) { this.sawHide = true; this.hideTarget = h; this.cool = 0; this.startChase(pl); if (this.state === 'chase') { this.onHeardInside?.(this); break; } }   // you made a sound in there
         if (this.wait <= 0) { this.state = 'patrol'; const p = this.nav.randomPoint(pl.pos, 15, 30); this.goTo(p.x, p.z); this.wait = 0; }
         break;
       }
@@ -432,9 +495,9 @@ export class Archivist extends Figure {
         break;
       }
       case 'chase': {
-        speed = 3.55 * boost * this.spd * (1 - this.daze * 0.85);
+        speed = 3.4 * boost * this.spd * (1 - this.daze * 0.85);
         this.chaseT += dt;
-        if (this.chaseT > 11 + this.anger) { this.giveUp(pl, 10); break; }   // it never hunts forever
+        if (this.chaseT > 8.5 + this.anger * 0.8) { this.giveUp(pl, 18); break; }   // it never hunts forever
         if (pl.hidden) {
           if (this.sawHide && this.hideTarget) {
             const f = this.hideTarget.front;
@@ -469,7 +532,7 @@ export class Archivist extends Figure {
     if (this.morphs) { const open = this.state === 'chase' ? 1 : this.state === 'dazed' ? 0.5 : 0.12; for (const m of this.morphs) m.o.morphTargetInfluences[m.i] += (open - m.o.morphTargetInfluences[m.i]) * Math.min(1, dt * 6); }
     if (moving) {
       this.stepPh += dt * (speed > 2.4 ? 5.4 : 3.2);
-      if (this.stepPh > 1) { this.stepPh = 0; const pan = Math.sin(Math.atan2(-dx, -dz) - pl.yaw + Math.PI); if (this.kind === 'crawler') this.audio.crawlStep(Math.max(0, 1 - dist / 13), -pan); else if (this.kind === 'skeleton') this.audio.rattle(Math.max(0, 1 - dist / 14), -pan); else if (this.kind !== 'nun') this.audio.ghostStep(Math.max(0, 1 - dist / 15) * (speed > 2.4 ? 1 : 0.6), -pan); }
+      if (this.stepPh > 1) { this.stepPh = 0; const pan = Math.sin(Math.atan2(-dx, -dz) - pl.yaw + Math.PI); if (this.kind === 'crawler') this.audio.crawlStep(Math.max(0, 1 - dist / 13), -pan); else if (this.kind === 'skeleton') this.audio.rattle(Math.max(0, 1 - dist / 14), -pan); else if (this.kind !== 'nun' && this.kind !== 'child') this.audio.ghostStep(Math.max(0, 1 - dist / 15) * (speed > 2.4 ? 1 : 0.6), -pan); }
     }
     const flick = 0.82 + 0.18 * Math.sin(time * 31) * Math.sin(time * 7.3);
     this.setOpacity(this.fade * (this.state === 'chase' ? 1 : flick));

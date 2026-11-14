@@ -208,7 +208,7 @@ export class Radar {
       b.life -= dt * (b.key ? 0.55 : 0.42);
       if (b.life <= 0) continue;
       const a = b.a - Math.PI / 2, x = cx + Math.cos(a) * b.r * R, y = cy + Math.sin(a) * b.r * R;
-      const col = b.key ? '230,190,90' : b.kind === 'fake' ? '255,255,255' : b.kind === 'wraith' ? '150,200,255' : b.kind === 'crawler' ? '255,140,60' : b.kind === 'nun' ? '200,140,255' : b.kind === 'skeleton' ? '235,228,200' : '255,60,50';
+      const col = b.key ? '230,190,90' : b.kind === 'fake' ? '255,255,255' : b.kind === 'wraith' ? '150,200,255' : b.kind === 'crawler' ? '255,140,60' : b.kind === 'nun' ? '200,140,255' : b.kind === 'child' ? '150,230,255' : b.kind === 'shadow' ? '120,20,20' : b.kind === 'skeleton' ? '235,228,200' : '255,60,50';
       const glow = g.createRadialGradient(x, y, 0, x, y, b.key ? 7 : 11); glow.addColorStop(0, `rgba(${col},${b.life})`); glow.addColorStop(0.35, `rgba(${col},${b.life * 0.45})`); glow.addColorStop(1, `rgba(${col},0)`);
       g.fillStyle = glow; g.beginPath(); g.arc(x, y, 11, 0, 7); g.fill();
     }
@@ -221,7 +221,7 @@ export class Radar {
     g.strokeStyle = 'rgba(110,160,125,.5)'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R + 1, 0, 7); g.stroke();
     if (this.readout) {
       const n = this.nearest;
-      const txt = !n || n.d > this.range ? 'NO CONTACT' : `${n.kind === 'wraith' ? 'AIRBORNE' : n.kind === 'crawler' ? 'LOW · FAST' : n.kind === 'nun' ? 'WEEPING' : n.kind === 'skeleton' ? 'BONES' : 'CONTACT'}  ${n.d.toFixed(0)} m`;
+      const txt = !n || n.d > this.range ? 'NO CONTACT' : `${n.kind === 'wraith' ? 'AIRBORNE' : n.kind === 'crawler' ? 'LOW · FAST' : n.kind === 'nun' ? 'WEEPING' : n.kind === 'child' ? 'SMALL' : n.kind === 'shadow' ? 'DO NOT BLINK' : n.kind === 'skeleton' ? 'BONES' : 'CONTACT'}  ${n.d.toFixed(0)} m`;
       if (txt !== this.lastTxt) { this.readout.textContent = txt; this.lastTxt = txt; this.readout.classList.toggle('hot', !!n && n.d < 8); }
     }
     return ping;
