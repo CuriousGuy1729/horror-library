@@ -7,6 +7,13 @@ const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Eule
  * that shares the bone names but has different rest orientations (Ready Player Me). Works in world space:
  * dstWorld(t) = srcWorld(t) * dstWorldRest, then converted back to local rotations.
  */
+/** Ghost glows. Each ghost only describes its glow; main.js feeds the brightest few into a small fixed pool of real lights,
+ *  so the scene's light count (and every surface shader) stays constant however many ghosts there are. */
+export const GLOWS = [];
+function ghostGlow(color, intensity, distance, decay) {
+  const o = new THREE.Object3D(); o.color = new THREE.Color(color); o.intensity = intensity; o.distance = distance; o.decay = decay; GLOWS.push(o); return o;
+}
+
 export function retargetClips(clips, srcRoot, dstRoot, prefix = 'mixamorig') {
   const dstBones = [];
   dstRoot.traverse((o) => { if (o.isBone) dstBones.push(o); });
@@ -238,7 +245,7 @@ export class Archivist extends Figure {
       });
       this.head = this.root.getObjectByName('Head');
     }
-    this.light = new THREE.PointLight({ crawler: 0xb04038, skeleton: 0xd09a5a, nun: 0xa9a2c8, child: 0x9fc4e8, shadow: 0x200000 }[this.kind] || 0x86b6dc, 0, 7, 1.8); this.light.position.set(0, this.kind === 'crawler' ? 0.6 : 1.4, 0.3); if (this.kind === 'child') this.light.position.y = 1.9; this.root.add(this.light);
+    this.light = ghostGlow({ crawler: 0xb04038, skeleton: 0xd09a5a, nun: 0xa9a2c8, child: 0x9fc4e8, shadow: 0x200000 }[this.kind] || 0x86b6dc, 0, 7, 1.8); this.light.position.set(0, this.kind === 'crawler' ? 0.6 : 1.4, 0.3); if (this.kind === 'child') this.light.position.y = 1.9; this.root.add(this.light);
     scene.add(this.root);
     this.path = []; this.lastKnown = new THREE.Vector3();
     this.reset();
@@ -373,7 +380,8 @@ export class Archivist extends Figure {
   investigate(x, z, urgent = false) { if (this.state === 'dormant') return; this.state = 'investigate'; this.urgent = urgent; this.goTo(x, z); this.searchLeft = 2; }
   startChase(pl) {
     if (this.state !== 'chase') {
-      if (this.cool > 0 || (this.canHunt && !this.canHunt(this))) return;
+      const close = !pl.hidden && Math.hypot(pl.pos.x - this.pos.x, pl.pos.z - this.pos.z) < 3.2;   // walk into one and it attacks, whatever the others are doing
+      if (this.cool > (close ? 4 : 0) || (!close && this.canHunt && !this.canHunt(this))) return;
       this.state = 'chase'; this.repath = 0; this.chaseT = 0; this.audio.sting(0.8); this.onAlert?.(this);
     }
     this.lastKnown.copy(pl.pos);
@@ -435,12 +443,12 @@ export class Archivist extends Figure {
     // ---- senses
     this.cool = Math.max(0, this.cool - dt);
     // being stared down: holding its gaze slows it, then leaves it transfixed
-    if (this.stared && this.state !== 'dazed') this.daze = Math.min(1, this.daze + dt / (this.kind === 'shadow' ? 5 : 1.5)); else this.daze = Math.max(0, this.daze - dt * 0.6);
-    if (this.daze >= 1 && this.state !== 'dazed') { this.state = 'dazed'; this.wait = 5.5; this.path = []; this.seen = 0; this.onDazed?.(this); }
+    if (this.stared && this.state !== 'dazed') this.daze = Math.min(1, this.daze + dt / (this.kind === 'shadow' ? 5 : 2.6)); else this.daze = Math.max(0, this.daze - dt * 0.6);
+    if (this.daze >= 1 && this.state !== 'dazed') { this.state = 'dazed'; this.wait = 4.5; this.path = []; this.seen = 0; this.onDazed?.(this); }
     const range = (pl.hidden ? 0 : pl.lightOn ? 12.5 : pl.crouch ? 3.2 : 6.5) * this.sight;
     const fwd = (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / (dist || 1);
     const sees = this.sees = dist < range && (fwd > 0.15 || dist < 2.6) && this.nav.los(this.pos.x, this.pos.z, pl.pos.x, pl.pos.z);
-    if (sees) { this.seen += dt * (dist < 3.2 ? 2.4 : dist < 7 ? 0.8 : 0.45); this.lostT = 0; this.lastKnown.copy(pl.pos); } else { this.seen = Math.max(0, this.seen - dt * 0.7); this.lostT += dt; }
+    if (sees) { this.seen += dt * (dist < 3.2 ? 3.2 : dist < 7 ? 1.3 : 0.75); this.lostT = 0; this.lastKnown.copy(pl.pos); } else { this.seen = Math.max(0, this.seen - dt * 0.7); this.lostT += dt; }
     // it hears footsteps, the radio — and, if the microphone is on, the player's real voice (even inside a cabinet)
     const hears = (!pl.hidden && pl.noise * this.hear > dist) || (pl.voice || 0) * this.hear > dist;
     // a first glimpse only makes it curious: it turns and comes to look, and the player gets a warning
@@ -452,17 +460,17 @@ export class Archivist extends Figure {
 
     switch (this.state) {
       case 'patrol': {
-        if (this.seen > 1.15) { this.startChase(pl); break; }
+        if (this.seen > 1) { this.startChase(pl); if (this.state === 'chase') break; this.investigate(pl.pos.x, pl.pos.z); this.searchLeft = 1; break; }   // not allowed to hunt yet: it stalks closer instead
         if (this.seen > 0.4) { this.face(pl.pos.x, pl.pos.z, dt, 2.5); break; }      // stops and stares before it commits
         if (hears) { this.investigate(pl.pos.x, pl.pos.z); break; }
-        if (this.wait > 0) { this.wait -= dt; if (this.wait <= 0) { const p = Math.random() < 0.3 ? this.nav.randomPoint(pl.pos, 9, 20) : this.nav.randomPoint(); this.goTo(p.x, p.z); } break; }
-        speed = 1.25 * boost * this.spd;
+        if (this.wait > 0) { this.wait -= dt; if (this.wait <= 0) { const p = Math.random() < 0.6 ? this.nav.randomPoint(pl.pos, 5, 14) : this.nav.randomPoint(); this.goTo(p.x, p.z); } break; }
+        speed = 1.45 * boost * this.spd;
         if (this.#follow(dt, speed)) this.wait = (1 + Math.random() * 2.5) * this.linger;
         break;
       }
       case 'investigate': {
-        if (this.seen > 0.9) { this.startChase(pl); break; }
-        if (hears && Math.random() < dt * 2) this.goTo(pl.pos.x, pl.pos.z);
+        if (this.seen > 0.8) { this.startChase(pl); if (this.state === 'chase') break; }
+        if ((hears || sees) && Math.random() < dt * 2) { this.goTo(pl.pos.x, pl.pos.z); this.wait = 0; }
         if (this.wait > 0) {
           this.wait -= dt;
           if (this.wait <= 0) {
@@ -491,24 +499,24 @@ export class Archivist extends Figure {
       case 'dazed': {     // transfixed by the player's stare
         this.face(pl.pos.x, pl.pos.z, dt, 2);
         this.wait -= dt;
-        if (this.wait <= 0) { this.daze = 0; this.giveUp(pl, 16); }
+        if (this.wait <= 0) { this.daze = 0; this.giveUp(pl, 7); }
         break;
       }
       case 'chase': {
-        speed = 3.4 * boost * this.spd * (1 - this.daze * 0.85);
+        speed = 3.7 * boost * this.spd * (1 - this.daze * 0.85);
         this.chaseT += dt;
-        if (this.chaseT > 8.5 + this.anger * 0.8) { this.giveUp(pl, 18); break; }   // it never hunts forever
+        if (this.chaseT > 15 + this.anger * 1.5 && dist > 4) { this.giveUp(pl, 9); break; }   // it never hunts forever
         if (pl.hidden) {
           if (this.sawHide && this.hideTarget) {
             const f = this.hideTarget.front;
             if (Math.hypot(f.x - this.pos.x, f.z - this.pos.z) < 0.9) return 'caught';
-            if (this.chaseT > 8) this.chaseT = 8;
+            if (this.chaseT > 14) this.chaseT = 14;
             this.repath -= dt; if (this.repath <= 0) { this.goTo(f.x, f.z); this.repath = 0.5; }
           } else if (this.lostT > 1.2) { this.seen = 0; this.cool = 3; this.investigate(this.lastKnown.x, this.lastKnown.z, true); break; }
         } else {
           this.sawHide = false;
           if (dist < this.reach && this.daze < 0.55) return 'caught';
-          if (this.lostT > 2.8) { this.seen = 0; this.cool = 3; this.investigate(this.lastKnown.x, this.lastKnown.z, true); break; }
+          if (this.lostT > 4.5) { this.seen = 0; this.cool = 2; this.investigate(this.lastKnown.x, this.lastKnown.z, true); break; }
           this.repath -= dt;
           if (this.repath <= 0) {
             this.repath = 0.3;
@@ -621,7 +629,7 @@ export class Wraith {
       }
       return { sh, el, hand, sx };
     });
-    this.light = new THREE.PointLight(0x7aa6d8, 0, 8, 1.8); this.light.position.set(0, 1.5, 0.5); root.add(this.light);
+    this.light = ghostGlow(0x7aa6d8, 0, 8, 1.8); this.light.position.set(0, 1.5, 0.5); root.add(this.light);
     this.target = new THREE.Vector3(); this.lastKnown = new THREE.Vector3(); this.vel = new THREE.Vector3();
     scene.add(root); this.reset();
   }

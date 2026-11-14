@@ -23,6 +23,7 @@ export class World {
     scene.environmentIntensity = 0.07;
 
     this.#materials(renderer);
+    this.q = quality;
     this.#lights(quality);
     this.#candles();
     this.#shafts();
@@ -113,7 +114,7 @@ export class World {
       return { pos, flames, lit: c.lit, kind: c.kind, power: (c.kind === 'chandelier' ? 14 : c.kind === 'floor' ? 5 : 2.6), ph: Math.random() * 100 };
     });
     this.pool = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < (this.q === 'high' ? 5 : this.q === 'medium' ? 4 : 3); i++) {
       const l = new THREE.PointLight(0xff8f3a, 0, 11, 1.9);
       this.scene.add(l); this.pool.push({ l, c: null, k: 0 });
     }

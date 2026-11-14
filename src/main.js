@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneRig } from 'three/addons/utils/SkeletonUtils.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { GLOWS } from './ghost.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -57,17 +58,50 @@ const GradeShader = {
       col = mix(col, vec3(col.r * 1.2 + 0.05, col.g * 0.25, col.b * 0.25), uHurt * 0.6);
       gl_FragColor = vec4(max(col, 0.0), 1.0); }`,
 };
-let composer, grade, bloom, quality = 'medium';
+let composer, grade, bloom, quality = 'medium', resScale = 1;
+const fixedPr = +(new URLSearchParams(location.search).get('pr') || 0);   // ?pr=0.6 pins the resolution (testing, trailer capture)
 function setupPost() {
-  const pr = quality === 'low' ? Math.min(devicePixelRatio, 1) * 0.8 : quality === 'medium' ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 2);
-  const dbg = import.meta.env.DEV && new URLSearchParams(location.search).get('pr');
+  const pr = (quality === 'low' ? Math.min(devicePixelRatio, 1) * 0.8 : quality === 'medium' ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 2)) * resScale;
+  const dbg = fixedPr;
+  if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); if (bloom) bloom.dispose(); bloom = null; }
   renderer.setPixelRatio(dbg ? +dbg : pr); renderer.setSize(innerWidth, innerHeight, false);
-  const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, samples: quality === 'high' ? 4 : quality === 'medium' ? 2 : 0 });
+  const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, samples: quality === 'high' ? 4 : 0 });
   composer = new EffectComposer(renderer, rt);
   composer.addPass(new RenderPass(scene, camera));
   if (quality !== 'low') { bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.42, 0.7, 0.82); composer.addPass(bloom); }
   composer.addPass(new OutputPass());
   grade = new ShaderPass(GradeShader); composer.addPass(grade);
+}
+// ---- frame-rate guard: if the machine cannot hold ~45 fps, render fewer pixels (then drop torch shadows) instead of stuttering
+const perf = { ms: 16, t: 0, last: 0, warm: 4, stage: 0 };
+function guardFps() {
+  const now = performance.now(), d = now - perf.last; perf.last = now;
+  if (fixedPr || d > 250 || d <= 0) return;                       // tab was hidden, or a one-off hitch
+  if (perf.warm > 0) { perf.warm -= d / 1000; return; }
+  perf.ms += (d - perf.ms) * 0.05; perf.t += d / 1000;
+  if (perf.t < 2) return;
+  perf.t = 0;
+  if (perf.ms < 22) return;
+  if (resScale > 0.56) { resScale = Math.max(0.55, resScale * 0.82); setupPost(); perf.ms = 16; perf.warm = 1; }
+  else if (perf.stage === 0 && player) { perf.stage = 1; player.torch.castShadow = false; perf.ms = 16; perf.warm = 2; }
+}
+// ---- the pool of real lights the ghosts' glows are routed through
+const glowPool = [0, 1].map(() => { const l = new THREE.PointLight(0xffffff, 0, 7, 1.8); scene.add(l); return l; });
+const _gv = new THREE.Vector3(), _gl = [];
+function updateGlows() {
+  _gl.length = 0;
+  for (const g of GLOWS) {
+    if (g.intensity < 0.02) continue;
+    let vis = true; for (let o = g.parent; o; o = o.parent) if (!o.visible) { vis = false; break; }
+    if (!vis) continue;
+    g.getWorldPosition(_gv); g._d = _gv.distanceToSquared(camera.position); g._score = g.intensity / (1 + g._d * 0.02); _gl.push(g);
+  }
+  _gl.sort((a, b) => b._score - a._score);
+  for (let i = 0; i < glowPool.length; i++) {
+    const l = glowPool[i], g = _gl[i];
+    if (!g) { l.intensity = 0; continue; }
+    g.getWorldPosition(l.position); l.color.copy(g.color); l.intensity = g.intensity; l.distance = g.distance; l.decay = g.decay;
+  }
 }
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -143,10 +177,14 @@ function build() {
     g.onAlert = (me) => { say(alertLine[me.kind], 1.8); player.shake = Math.max(player.shake, 0.5); const pan = panTo(me.pos.x, me.pos.z); if (me.kind === 'crawler') audio.growl(1, pan); else if (me.kind === 'nun') audio.shriek(0.9, pan); else if (me.kind === 'child') { audio.giggle(1.4, pan); audio.smp('children-laughing-3', { vol: 0.9, pan }); } else if (me.kind === 'skeleton') { for (let i = 0; i < 6; i++) setTimeout(() => audio.rattle(1, pan), i * 90); audio.moan(1, pan); } };
     g.onSuspect = (me) => { if (state === 'playing' && !anyHunting()) { say('Something has turned towards you. Break its line of sight.', 3); audio.whisper(panTo(me.pos.x, me.pos.z), 0.9); G.fear = Math.max(G.fear, 0.6); } };
     g.onHeardInside = () => { say('IT HEARD YOU IN THERE.', 2.5); };
-    g.onGiveUp = () => { G.huntCool = 32 + Math.random() * 16; if (state === 'playing') say('It has lost interest… for now.', 3); };
-    g.onDazed = (me) => { G.huntCool = 36; G.stares++; say('It cannot look away. Go — quietly.', 3.5); audio.whisper(panTo(me.pos.x, me.pos.z), 1); };
+    g.onGiveUp = () => { G.huntCool = 10 + Math.random() * 8; if (state === 'playing') say('It has lost interest… for now.', 3); };
+    g.onDazed = (me) => { G.huntCool = 8; me.dazeImmune = 30; G.stares++; say('It cannot look away. Go — quietly.', 3.5); audio.whisper(panTo(me.pos.x, me.pos.z), 1); };
   }
   archivist.onStare = () => { audio.knock(0); setTimeout(() => audio.whisper(0, 0.9), 900); };
+  // compile every shader up front (hidden ghosts included) so nothing hitches the first time it appears
+  const hid = []; scene.traverse((o) => { if (!o.visible) { hid.push(o); o.visible = true; } });
+  try { renderer.compile(scene, camera); } catch { /* not fatal */ }
+  for (const o of hid) o.visible = false;
 }
 
 function newRun() {
@@ -163,7 +201,7 @@ function newRun() {
     emfOn: false, emfLv: 0, emfSpike: 0, emfT: 0, emfJit: 0, voiceCool: 0, replyCool: 0, talkT: 0, quietT: 0, radioWord: '', radioWordT: 0, bookT: 0, books: [],
     cryT: 5, introT: 7, time: 0, hints, noteRead: false, noteOpen: false, awake: false, awakeT: -1, exit: 'locked', exitT: 0, fear: 0, hurt: 0,
     scareT: 14 + Math.random() * 14, lastScare: '', ev: null, dieT: 0, hides: 0, scares: 0, target: null, msgT: 0, peekT: 0, batteriesWarned: false,
-    huntCool: 50, awakeAt: 0, stares: 0, nerveBroken: false, staring: false, flashT: 0, flashDur: 1, stormT: 14 + Math.random() * 12, pingT: 0, radioT: 12, killer: null, staredHint: false, tipT: 9,
+    huntCool: 18, awakeAt: 0, stares: 0, nerveBroken: false, staring: false, flashT: 0, flashDur: 1, stormT: 14 + Math.random() * 12, pingT: 0, radioT: 12, killer: null, staredHint: false, tipT: 9,
   };
   ui.noteText.innerHTML = '<p><i>The doors are sealed with three locks. I have hidden the keys where no reader would think to look:</i></p><ul>' +
     hints.map((h) => `<li>One lies ${h}.</li>`).join('') + '</ul><p><i>Should you take one, I will know. Put out your light when you hear me. Stand inside the cabinets and do not breathe.</i></p>';
@@ -485,10 +523,11 @@ function updateStare(dt) {
   let any = false, close = null;
   const can = player.mode === 'free' && !G.nerveBroken;
   for (const g of ghosts) {
-    g.stared = false;
-    if (!g.active || !can || g.state === 'dazed') continue;
+    g.stared = false; g.dazeImmune = Math.max(0, (g.dazeImmune || 0) - dt);
+    // a stare only stops a ghost that is already coming for you, and the same ghost will not fall for it twice in a row
+    if (!g.active || !can || g.state === 'dazed' || g.dazeImmune > 0 || !(g.hunting || g.kind === 'shadow')) continue;
     g.headPos(_b); _c.copy(_b).sub(camera.position); const d = _c.length();
-    if (d > 10 || _c.dot(_a) / d < 0.972) continue;
+    if (d > (g.kind === 'shadow' ? 26 : 7) || _c.dot(_a) / d < 0.972) continue;
     if (g.kind !== 'wraith' && !nav.los(player.pos.x, player.pos.z, g.pos.x, g.pos.z)) continue;
     g.stared = true; any = true; close = g;
   }
@@ -762,7 +801,7 @@ function updatePlaying(dt) {
       archivist.spawn({ x: far[0], z: far[2] }); archivist.anger = player.keysHeld;
       world.blowOut(player.pos, 9); audio.blowOut(); audio.sting(0.55); player.flick = 0.05; player.shake = Math.max(player.shake, 0.45); lightning(1, 0.4);
       say('Something has noticed you.', 4);
-      setTimeout(() => state === 'playing' && say('Hide in the cabinets (E), kill your torch (F) — or look it dead in the eyes.', 6.5), 4600);
+      setTimeout(() => state === 'playing' && say('Hide in the cabinets (E), kill your torch (F) — or, when it is almost on you, look it dead in the eyes.', 6.5), 4600);
     }
   }
   if (G.introT > 0) { G.introT -= dt; if (G.introT <= 0) say('You are not alone. Someone is weeping in the dark — and something dry is walking.', 5.5); }
@@ -871,6 +910,7 @@ function frame() {
   else if (state === 'paused') return;
   grade.uniforms.uTime.value = performance.now() / 1000 % 100;
   grade.uniforms.uFear.value = G ? G.fear : 0; grade.uniforms.uHurt.value = G ? G.hurt : 0;
+  updateGlows(); guardFps();
   composer.render(dt);
 }
 frame();

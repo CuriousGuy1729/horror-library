@@ -43,10 +43,12 @@ Jumpscares come at irregular intervals from the start of a run, whether or not y
 
 - You carry an **EMF meter** in the left hand and a **spirit box** in the right (first person). The meter climbs and beeps faster as a ghost closes in.
 - With the **microphone** on (the browser asks for permission; audio never leaves your machine), the game listens to how loud you are. Stay quiet and you are harder to find. Shout and the nearest ghost comes to look. Speak with the spirit box on, then pause, and something answers through the static.
-- Stare a ghost down with the torch to daze it, throw books to lead it away, and light or pinch out candles with **E**.
-- Ghosts now investigate first and hunt rarely: after a chase ends they leave you alone for a good while.
+- Stare a hunting ghost down at close range to stop it for a moment, throw books to lead it away, and light or pinch out candles with **E**.
+- Ghosts give a short warning when they first glimpse you, then come for you. A chase lasts about 15 seconds unless you break line of sight or hide; afterwards you get roughly 10–20 seconds of breathing room. Walk into one and it attacks at once.
 
 The layout adapts to the window: small windows, phones in landscape and very wide screens all get a scaled HUD and menu (the game still needs a keyboard and mouse).
+
+**Performance.** The game watches its own frame rate: if it drops below about 45 fps it renders at a lower internal resolution, and as a last step turns off torch shadows. Ghost glows share two real lights, and all shaders are compiled while loading so nothing stutters the first time a ghost appears. If it is still heavy, choose *Low* quality in the menu.
 
 ## Assets and licences
 
@@ -57,13 +59,15 @@ The player body (`human_m.glb`), the Sister (`human_f.glb`) and the clips in `pu
 - **The Hollow** are apparitions: at the gallery rail, at the edge of your light, right behind you.
 
 No ghost hunts forever: each one gives up after a few seconds, only one hunts at a time, and they rest between hunts.
-**Look a ghost in the eyes** and hold its gaze: it slows, then freezes, then drifts away. Your nerve (the eye meter) runs out if you stare too long.
+**Look a hunting ghost in the eyes** when it is close (within about 7 m) and hold its gaze: it slows, then freezes for a few seconds. It only works on a ghost that is already chasing you, the same ghost cannot be stopped again for 30 seconds, and your nerve (the eye meter) runs out if you stare too long.
 
 **Tools:** the radar sweeps for contacts (red walker, blue flyer, orange crawler, gold = nearest key). The radio plays a warped waltz; its static swells when something is close and it sometimes mutters where a key is — but the dead can hear it too.
 
 Also in the dark: a thunderstorm with lightning through the great window, a bat colony, posters whose writing changes when you are not looking, and scares that escalate with every key.
 
 ## Trailer
+
+**Download the video:** [`media/the-hollow-archive-trailer.mp4`](media/the-hollow-archive-trailer.mp4) (66 s, 720p, rendered frame by frame from the game engine, with a soundtrack mixed from the game's CC0 recordings).
 
 Open the game with `?trailer` added to the address (for example `http://localhost:5173/?trailer`), or use the "Watch the trailer" link on the menu. It plays a 66-second cinematic rendered live by the game: scripted camera moves, every ghost, captions and the game's own sound.
 
